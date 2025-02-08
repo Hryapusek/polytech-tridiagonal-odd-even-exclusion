@@ -1,0 +1,1 @@
+# polytech-tridiagonal-odd-even-exclusion
