@@ -5,13 +5,13 @@
 #include <contract/contract.hpp>
 
 auto DefaultEulerExplicitMethod::integrate(
-  Eigen::VectorX<Number_t> const& start_v,
-  Eigen::MatrixX<Number_t> const& A,
-  Eigen::SparseVector<Number_t> const& g,
-  std::vector<Number_t> const& points
-) -> Eigen::SparseMatrix<Number_t>
+  Eigen::VectorXd const& start_v,
+  Eigen::MatrixXd const& A,
+  Eigen::SparseVector<double> const& g,
+  std::vector<double> const& points
+) -> Eigen::SparseMatrix<double>
 {
-  auto result = Eigen::MatrixX<Number_t>(
+  auto result = Eigen::MatrixXd(
     A.rows(),
     points.size()
   );  // Adjust columns based on intervals size
@@ -29,7 +29,7 @@ auto DefaultEulerExplicitMethod::integrate(
 
   result.col(0) = start_v.sparseView();
 
-  auto E = Eigen::SparseMatrix<Number_t>(A.rows(), A.rows());
+  auto E = Eigen::SparseMatrix<double>(A.rows(), A.rows());
   E.setIdentity();
   auto H = points.at(1) - points.at(0);                 // Step size
   // for(size_t i = 1; i < 2; ++i) {                 // Loop over intervals, not A.cols()

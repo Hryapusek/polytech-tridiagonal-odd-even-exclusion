@@ -6,7 +6,7 @@
 
 #include <interval_splitter.hpp>
 
-auto DefaultMainMatrixCalculator::calc_a(size_t r_index, Number_t t) const -> Number_t
+auto DefaultMainMatrixCalculator::calc_a(size_t r_index, double t) const -> double
 {
   contract(fun)
   {
@@ -24,7 +24,7 @@ auto DefaultMainMatrixCalculator::calc_a(size_t r_index, Number_t t) const -> Nu
   return mid_point * k_value / h_value;
 }
 
-auto DefaultMainMatrixCalculator::calc_b(size_t r_index, Number_t t) const -> Number_t
+auto DefaultMainMatrixCalculator::calc_b(size_t r_index, double t) const -> double
 {
   contract(fun)
   {
@@ -45,7 +45,7 @@ auto DefaultMainMatrixCalculator::calc_b(size_t r_index, Number_t t) const -> Nu
 }
 
 /* clang-format off */
-auto DefaultMainMatrixCalculator::calc_c(size_t r_index, Number_t t) const -> Number_t
+auto DefaultMainMatrixCalculator::calc_c(size_t r_index, double t) const -> double
 {
   contract(fun) {
     precondition(r_index != 0, "You should not calculate anything for index == 0 - you already have v function");
@@ -77,7 +77,7 @@ auto DefaultMainMatrixCalculator::calc_c(size_t r_index, Number_t t) const -> Nu
 /* clang-format on */
 
 /* clang-format off */
-auto DefaultMainMatrixCalculator::calc_g(size_t r_index, Number_t t) const -> Number_t {
+auto DefaultMainMatrixCalculator::calc_g(size_t r_index, double t) const -> double {
   contract(fun) {
     precondition(r_index != 0, "You should not calculate anything for index == 0 - you already have v function");
   };

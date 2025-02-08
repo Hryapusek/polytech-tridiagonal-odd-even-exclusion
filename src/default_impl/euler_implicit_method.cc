@@ -43,13 +43,13 @@ void solve_tridiagonal(
 }
 
 auto DefaultEulerImplicitMethod::integrate(
-    Eigen::VectorX<Number_t> const& start_v,
-    Eigen::MatrixX<Number_t> const& A,
-    Eigen::SparseVector<Number_t> const& g,
-    std::vector<Number_t> const& points
-) -> Eigen::SparseMatrix<Number_t>
+    Eigen::VectorXd const& start_v,
+    Eigen::MatrixXd const& A,
+    Eigen::SparseVector<double> const& g,
+    std::vector<double> const& points
+) -> Eigen::SparseMatrix<double>
 {
-    Eigen::MatrixX<Number_t> result(
+    Eigen::MatrixXd result(
         A.rows(), points.size());  // Adjust the columns to match intervals
 
     contract(fun)
@@ -65,15 +65,15 @@ auto DefaultEulerImplicitMethod::integrate(
 
     result.col(0) = start_v.sparseView();
 
-    auto E = Eigen::SparseMatrix<Number_t>(A.rows(), A.rows());
+    auto E = Eigen::SparseMatrix<double>(A.rows(), A.rows());
     E.setIdentity();
 
     for (size_t i = 1; i < points.size(); ++i) {  // Iterate over intervals
         auto H = points.at(i) - points.at(i - 1);  // Step size
-        Eigen::SparseMatrix<Number_t> M = E - H * A;  // Matrix for the implicit step
+        Eigen::SparseMatrix<double> M = E - H * A;  // Matrix for the implicit step
 
         // Prepare the right-hand side of the equation
-        Eigen::SparseVector<Number_t> rhs = result.col(i - 1) + H * g;
+        Eigen::SparseVector<double> rhs = result.col(i - 1) + H * g;
 
         // We will now extract the tridiagonal parts of M to solve the system
         size_t n = M.rows();

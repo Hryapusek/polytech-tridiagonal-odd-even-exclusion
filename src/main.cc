@@ -16,8 +16,8 @@
 auto build_main_matrix(
   DefaultMainMatrixCalculator const& calc,
   double t,
-  Eigen::MatrixX<Number_t>& main_matrix
-) -> Eigen::MatrixX<Number_t>
+  Eigen::MatrixXd& main_matrix
+) -> Eigen::MatrixXd
 {
   auto const size = calc.r_points().size() - 1;
   contract(fun) { precondition(main_matrix.rows() == size and main_matrix.cols() == size); };
@@ -37,10 +37,10 @@ auto build_main_matrix(
   return main_matrix;
 }
 
-auto build_g_vector(DefaultMainMatrixCalculator const& calc, Number_t t)
-  -> Eigen::SparseVector<Number_t>
+auto build_g_vector(DefaultMainMatrixCalculator const& calc, double t)
+  -> Eigen::SparseVector<double>
 {
-  auto g = Eigen::SparseVector<Number_t>(calc.r_points().size() - 1);
+  auto g = Eigen::SparseVector<double>(calc.r_points().size() - 1);
   for(size_t row = 0; row < calc.r_points().size() - 1; ++row) {
     g.insert(row) = calc.calc_g(row + 1, t);
   }
@@ -49,18 +49,18 @@ auto build_g_vector(DefaultMainMatrixCalculator const& calc, Number_t t)
 
 auto integrate(
   DefaultMainMatrixCalculator const& calc,
-  std::vector<Number_t> const& r_points,
-  std::vector<Number_t> const& t_points,
-  Eigen::VectorX<Number_t> const& start_v,
+  std::vector<double> const& r_points,
+  std::vector<double> const& t_points,
+  Eigen::VectorXd const& start_v,
   IBaseIntegrate& method
-) -> std::tuple<Eigen::MatrixX<Number_t>, double, double>
+) -> std::tuple<Eigen::MatrixXd, double, double>
 {
   auto result = Eigen::MatrixXd(Eigen::MatrixXd::Zero(r_points.size() - 1, t_points.size()));
   result.col(0) = start_v;
 
   std::cout << std::setprecision(4);
-  Eigen::MatrixX<Number_t> main_matrix(calc.r_points().size() - 1, calc.r_points().size() - 1);
-  Eigen::VectorX<Number_t> g;
+  Eigen::MatrixXd main_matrix(calc.r_points().size() - 1, calc.r_points().size() - 1);
+  Eigen::VectorXd g;
   double total_main_matrix_time = 0;
   double total_integrate_time = 0;
   for(size_t i = 1; i < t_points.size(); ++i) {
@@ -82,7 +82,7 @@ auto integrate(
                               .count();
     total_main_matrix_time += main_matrix_time;
     start = std::chrono::high_resolution_clock::now();
-    auto points = std::vector<Number_t>(t_points.cbegin() + i - 1, t_points.cbegin() + i + 1);
+    auto points = std::vector<double>(t_points.cbegin() + i - 1, t_points.cbegin() + i + 1);
     auto integrated_result =
       method.integrate(result.col(i - 1), main_matrix.sparseView(), g.sparseView(), points);
     auto integrate_time = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -123,9 +123,9 @@ void print_table_header()
 
 void print_row(
   R_T_Function_type original_func,
-  std::vector<Number_t> const& r_points,
-  std::vector<Number_t> const& t_points,
-  Eigen::VectorX<Number_t> const& start_v,
+  std::vector<double> const& r_points,
+  std::vector<double> const& t_points,
+  Eigen::VectorXd const& start_v,
   Eigen::MatrixXd const& result,
   IBaseIntegrate& method,
   double build_main_matrix_time,
@@ -135,25 +135,25 @@ void print_row(
   size_t t_steps_count = t_points.size() - 1;
   size_t r_steps_count = r_points.size() - 1;
 
-  Number_t t_step_size = (t_points.back() - t_points.front()) / t_steps_count;
-  Number_t r_step_size = (r_points.back() - r_points.front()) / r_steps_count;
+  double t_step_size = (t_points.back() - t_points.front()) / t_steps_count;
+  double r_step_size = (r_points.back() - r_points.front()) / r_steps_count;
 
   // Initialize inaccuracies for columns and total
-  Number_t sum_inaccuracy_total = 0, max_inaccuracy_total = 0;
-  Number_t sum_inaccuracy_2nd_col = 0, max_inaccuracy_2nd_col = 0;
-  Number_t sum_inaccuracy_middle_col = 0, max_inaccuracy_middle_col = 0;
-  Number_t sum_inaccuracy_last_col = 0, max_inaccuracy_last_col = 0;
-  Number_t sum_inaccuracy_each_cell = 0;
+  double sum_inaccuracy_total = 0, max_inaccuracy_total = 0;
+  double sum_inaccuracy_2nd_col = 0, max_inaccuracy_2nd_col = 0;
+  double sum_inaccuracy_middle_col = 0, max_inaccuracy_middle_col = 0;
+  double sum_inaccuracy_last_col = 0, max_inaccuracy_last_col = 0;
+  double sum_inaccuracy_each_cell = 0;
 
   // Iterate over all cells of the result matrix
   for(size_t i = 1; i < r_points.size(); ++i) {  // Skip the first row (r = 0)
     for(size_t j = 0; j < t_points.size(); ++j) {
-      Number_t r = r_points[i];
-      Number_t t = t_points[j];
-      Number_t actual_value = original_func(r, t);
-      Number_t result_value = result(i - 1, j);  // Note that we offset by 1 for r = 0
+      double r = r_points[i];
+      double t = t_points[j];
+      double actual_value = original_func(r, t);
+      double result_value = result(i - 1, j);  // Note that we offset by 1 for r = 0
 
-      Number_t inaccuracy = std::abs(actual_value - result_value);
+      double inaccuracy = std::abs(actual_value - result_value);
       sum_inaccuracy_each_cell += inaccuracy;
 
       // Sum and Max inaccuracies for the whole matrix
@@ -214,7 +214,7 @@ void do_all(std::shared_ptr<InputParameters> params, R_T_Function_type expected_
 
         DefaultMainMatrixCalculator calc(params, r_points);
 
-        Eigen::SparseVector<Number_t> start_v(r_points.size() - 1);
+        Eigen::SparseVector<double> start_v(r_points.size() - 1);
         for(auto i = 0; i < r_points.size() - 1; ++i) {
           start_v.insert(i) = params->phi(r_points.at(i + 1));
         }

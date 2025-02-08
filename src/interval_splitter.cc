@@ -1,8 +1,8 @@
 #include <interval_splitter.hpp>
 
-auto split_interval(Number_t const& left, Number_t const& right, size_t num_intervals) -> std::vector<Number_t>
+auto split_interval(double const& left, double const& right, size_t num_intervals) -> std::vector<double>
 {
-  std::vector<Number_t> intervals;
+  std::vector<double> intervals;
 
   contract(fun)
   {
@@ -18,7 +18,7 @@ auto split_interval(Number_t const& left, Number_t const& right, size_t num_inte
 }
 
 // Calculate the length of an interval `index-1` to `index`
-auto calc_h(std::vector<Number_t> const& points, size_t index) -> Number_t
+auto calc_h(std::vector<double> const& points, size_t index) -> double
 {
   contract(fun)
   {
@@ -30,7 +30,7 @@ auto calc_h(std::vector<Number_t> const& points, size_t index) -> Number_t
 }
 
 // Calculate the cross h of an interval
-auto calc_cross_h(std::vector<Number_t> const& points, size_t index) -> Number_t
+auto calc_cross_h(std::vector<double> const& points, size_t index) -> double
 {
   if(index == 0) {
     return calc_h(points, 1) / 2;
@@ -44,7 +44,7 @@ auto calc_cross_h(std::vector<Number_t> const& points, size_t index) -> Number_t
 }
 
 /// @return middle point between `index` and `index - 1`
-auto middle_point(std::vector<Number_t> const& points, size_t index) -> Number_t
+auto middle_point(std::vector<double> const& points, size_t index) -> double
 {
   return (points.at(index) + points.at(index - 1)) / 2;
 }

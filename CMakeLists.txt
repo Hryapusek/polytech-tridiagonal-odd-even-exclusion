@@ -25,7 +25,7 @@ target_include_directories(${PROJECT_NAME}
 
 target_link_libraries(${PROJECT_NAME}
   PUBLIC
-    Eigen3::Eigen
+    eigen
 )
 
 add_executable(${PROJECT_NAME}-main src/main.cc)
