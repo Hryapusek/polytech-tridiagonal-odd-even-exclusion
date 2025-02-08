@@ -1,0 +1,6 @@
+[submodule "external/src/contract"]
+	path = external/src/contract
+	url = https://github.com/alexeiz/contract.git
+[submodule "external/src/eigen"]
+	path = external/src/eigen
+	url = https://github.com/PX4/eigen.git
