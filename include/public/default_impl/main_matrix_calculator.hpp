@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vector>
 #include <memory>
 
 #include <Eigen/Dense>
@@ -15,7 +16,7 @@ class DefaultMainMatrixCalculator : public IMainMatrixCalculator
     std::vector<double> x_points,
     std::vector<double> y_points
   )
-    : m_params(std::move(params)),
+    : m_input_p(std::move(params)),
       m_x_points(std::move(x_points)),
       m_y_points(std::move(y_points))
   {}
@@ -27,10 +28,10 @@ class DefaultMainMatrixCalculator : public IMainMatrixCalculator
   auto calc_d(Index index) const -> double override;
   auto calc_e(Index index) const -> double override;
 
-  auto params() const -> std::shared_ptr<InputParameters> const& { return m_params; }
+  auto params() const -> std::shared_ptr<InputParameters> const& { return m_input_p; }
 
  protected:
-  std::shared_ptr<InputParameters> m_params;
+  std::shared_ptr<InputParameters> m_input_p;
 
   std::vector<double> m_x_points;
   std::vector<double> m_y_points;
