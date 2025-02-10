@@ -30,6 +30,9 @@ class DefaultMainMatrixCalculator : public IMainMatrixCalculator
 
   auto params() const -> std::shared_ptr<InputParameters> const& { return m_input_p; }
 
+  auto x_points() const -> std::vector<double> const& override { return m_x_points; }
+  auto y_points() const -> std::vector<double> const& override { return m_y_points; }
+
  protected:
   std::shared_ptr<InputParameters> m_input_p;
 

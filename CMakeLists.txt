@@ -10,6 +10,8 @@ add_library(${PROJECT_NAME} STATIC
   external/src/contract/src/contract.cpp
     
   src/default_impl/main_matrix_calculator.cc
+  src/default_impl/odd_even_reduction.cc
+  src/utils.cc
     
   src/interval_splitter.cc
 )
