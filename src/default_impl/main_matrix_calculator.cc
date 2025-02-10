@@ -6,22 +6,33 @@
 
 #include <interval_splitter.hpp>
 
-auto DefaultMainMatrixCalculator::calc_a(size_t r_index, double t) const -> double
+auto DefaultMainMatrixCalculator::calc_a(Index index) const -> double
 {
-  contract(fun)
-  {
-    precondition(
-      r_index != 0,
-      "You should not calculate anything for index == 0 - you already have v function"
-    );
-    precondition(r_index != 1, "You should not calculate a for index == 1");
-    precondition(r_index < r_points_.size(), "index out of range");
+  // clang-format off
+  contract(fun) {
+    precondition(index.i < m_x_points.size(), "index out of range");
+    precondition(index.j < m_y_points.size(), "index out of range");
   };
-  auto mid_point = middle_point(r_points_, r_index);
-  auto k_value = params_->k(mid_point, t);
-  auto h_value = calc_h(r_points_, r_index);
+  // clang-format on
 
-  return mid_point * k_value / h_value;
+  if(index.i == 0 and index.j == 0) {                          // i == 0 and j == 0
+    return 1;                                                  // Not too sure
+  }
+  else if(index.i == 0 and index.j < m_y_points.size() - 1) {  // i == 0
+    return 0;
+  }
+  else if(index.j == 0 and index.i < m_x_points.size() - 1) {                                      // j == 0
+    return 0;
+  }
+  else if(index.i == m_x_points.size() - 1 and index.j < m_y_points.size() - 1) {  // i == Nx
+    return -1;
+  }
+  else if(index.i < m_x_points.size() - 1 and index.j == m_y_points.size() - 1) {  // j == Nx
+    return 0;
+  }
+  else /*if(index.i == m_x_points.size() - 1 and index.j == m_y_points.size() - 1)*/ {
+    return 1;
+  }
 }
 
 auto DefaultMainMatrixCalculator::calc_b(size_t r_index, double t) const -> double
@@ -37,7 +48,7 @@ auto DefaultMainMatrixCalculator::calc_b(size_t r_index, double t) const -> doub
       "You should not calculate b for index == intervals_.size() - 1"
     );
     precondition(r_index < r_points_.size(), "index out of range");
-  };
+  }
   auto up = middle_point(r_points_, r_index + 1)
           * params_->k(middle_point(r_points_, r_index + 1), t);
   auto down = calc_h(r_points_, r_index + 1);

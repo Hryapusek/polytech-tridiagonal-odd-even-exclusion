@@ -2,8 +2,8 @@
 
 #include <functional>
 
-// First argument is r, second is t
-using R_T_Function_type = std::function<double(double, double)>;
+// First argument is X, second is Y
+using X_Y_Function_type = std::function<double(double, double)>;
 
-using T_Function_type = std::function<double(double)>;
-using R_Function_type = std::function<double(double)>;
+using X_Function_type = std::function<double(double)>;
+using Y_Function_type = std::function<double(double)>;

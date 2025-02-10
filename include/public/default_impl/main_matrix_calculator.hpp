@@ -12,22 +12,26 @@ class DefaultMainMatrixCalculator : public IMainMatrixCalculator
  public:
   explicit DefaultMainMatrixCalculator(
     std::shared_ptr<InputParameters> params,
-    std::vector<double> r_points
+    std::vector<double> x_points,
+    std::vector<double> y_points
   )
-    : params_(params)
-    , r_points_(std::move(r_points))
+    : m_params(std::move(params)),
+      m_x_points(std::move(x_points)),
+      m_y_points(std::move(y_points))
   {}
 
-  auto calc_a(size_t r_index, double t) const -> double override;
-  auto calc_b(size_t r_index, double t) const -> double override;
-  auto calc_c(size_t r_index, double t) const -> double override;
-  auto calc_g(size_t r_index, double t) const -> double override;
+  auto calc_a(Index index) const -> double override;
+  auto calc_b(Index index) const -> double override;
+  auto calc_c(Index index) const -> double override;
+  auto calc_g(Index index) const -> double override;
+  auto calc_d(Index index) const -> double override;
+  auto calc_e(Index index) const -> double override;
 
-  auto r_points() const -> std::vector<double> const& { return r_points_; }
-
-  auto params() const -> std::shared_ptr<InputParameters> const& { return params_; }
+  auto params() const -> std::shared_ptr<InputParameters> const& { return m_params; }
 
  protected:
-  std::vector<double> r_points_;
-  std::shared_ptr<InputParameters> params_;
+  std::shared_ptr<InputParameters> m_params;
+
+  std::vector<double> m_x_points;
+  std::vector<double> m_y_points;
 };

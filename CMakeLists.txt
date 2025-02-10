@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16.3)
 
-project(lab2 LANGUAGES CXX)
+project(course LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -9,10 +9,7 @@ add_subdirectory(external/src/eigen)
 add_library(${PROJECT_NAME} STATIC
   external/src/contract/src/contract.cpp
     
-  src/default_impl/euler_explicit_method.cc
-  src/default_impl/euler_implicit_method.cc
   src/default_impl/main_matrix_calculator.cc
-  src/default_impl/rkf_method.cc
     
   src/interval_splitter.cc
 )
