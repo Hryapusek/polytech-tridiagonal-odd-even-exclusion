@@ -13,20 +13,14 @@
 #include <default_impl/odd_even_reduction.hpp>
 #include <utils.hpp>
 
-auto build_main_matrix(DefaultMainMatrixCalculator const& calc) -> Eigen::MatrixXd
+auto build_main_matrix(DefaultMainMatrixCalculator const& calc) -> Eigen::SparseMatrix<double>
 {
-  static auto cached_matrix = std::shared_ptr<Eigen::MatrixXd> {};
-
-  if (cached_matrix) {
-    return *cached_matrix;
-  }
-
   size_t Nx = calc.interiour_x_points().size();  // Interior points in x-direction
   size_t Ny = calc.interiour_y_points().size();  // Interior points in y-direction
   size_t size = Nx * Ny;  // Total unknowns (interior grid points)
 
-  cached_matrix = std::make_shared<Eigen::MatrixXd>(size, size);
-  cached_matrix->setZero();  // Initialize with zeros
+  auto result = Eigen::SparseMatrix<double>(size, size);
+  result.setZero();  // Initialize with zeros
 
   // Iterate over the interior grid
   for (size_t i = 0; i < Nx; ++i) {    
@@ -35,30 +29,30 @@ auto build_main_matrix(DefaultMainMatrixCalculator const& calc) -> Eigen::Matrix
 
       // Left neighbor (i-1, j)
       if (i > 0) {
-        (*cached_matrix)(idx, idx - Ny) = calc.calc_a({i, j});
+        result.insert(idx, idx - Ny) = calc.calc_a({i, j});
       }
 
       // Right neighbor (i+1, j)
       if (i < Nx - 1) {
-        (*cached_matrix)(idx, idx + Ny) = calc.calc_b({i, j});
+        result.insert(idx, idx + Ny) = calc.calc_b({i, j});
       }
 
       // Bottom neighbor (i, j-1)
       if (j > 0) {
-        (*cached_matrix)(idx, idx - 1) = calc.calc_d({i, j});
+        result.insert(idx, idx - 1) = calc.calc_d({i, j});
       }
 
       // Top neighbor (i, j+1)
       if (j < Ny - 1) {
-        (*cached_matrix)(idx, idx + 1) = calc.calc_e({i, j});
+        result.insert(idx, idx + 1) = calc.calc_e({i, j});
       }
 
       // Center coefficient
-      (*cached_matrix)(idx, idx) = calc.calc_c({i, j});
+      result.insert(idx, idx) = calc.calc_c({i, j});
     }
   }
 
-  return *cached_matrix;
+  return result;
 }
 
 
@@ -106,11 +100,9 @@ auto convert_w_to_v(Eigen::VectorXd const& w, DefaultMainMatrixCalculator const&
     size_t Nx = calc.interiour_x_points().size();
     size_t Ny = calc.interiour_y_points().size();
 
-    // Full grid size (includes boundaries)
     Eigen::MatrixXd v(Nx + 2, Ny + 2);
     v.setZero();  // Initialize with zeros
 
-    // 🔹 Map interior points from w back to v
     size_t idx = 0;
     for (size_t i = 1; i <= Nx; ++i) {  // Skip first & last row (boundaries)
         for (size_t j = 1; j <= Ny; ++j) {  // Skip first & last column (boundaries)
@@ -118,30 +110,25 @@ auto convert_w_to_v(Eigen::VectorXd const& w, DefaultMainMatrixCalculator const&
         }
     }
 
-    // 🔹 Apply boundary conditions using input parameters
     auto params = calc.params();
 
-    // Left boundary (x = xl, using u1)
     for (size_t j = 0; j < Ny + 2; ++j) {
         v(0, j) = params->u1(calc.y_points()[j]);
     }
 
-    // Right boundary (x = xr, using u2)
     for (size_t j = 0; j < Ny + 2; ++j) {
         v(Nx + 1, j) = params->u2(calc.y_points()[j]);
     }
 
-    // Bottom boundary (y = yl, using u3)
     for (size_t i = 0; i < Nx + 2; ++i) {
         v(i, 0) = params->u3(calc.x_points()[i]);
     }
 
-    // Top boundary (y = yr, using u4)
     for (size_t i = 0; i < Nx + 2; ++i) {
         v(i, Ny + 1) = params->u4(calc.x_points()[i]);
     }
 
-    return v;  // ✅ Return reconstructed solution grid
+    return v;
 }
 
 
@@ -164,8 +151,8 @@ void print_expected(DefaultMainMatrixCalculator const& calc, X_Y_Function_type e
 
 void _do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
 {
-  static constexpr auto x_interval_counts = {10};
-  static constexpr auto y_interval_counts = {10};
+  static constexpr auto x_interval_counts = {20};
+  static constexpr auto y_interval_counts = {20};
 
   for(auto const x_count : x_interval_counts) {
     for(auto const y_count : y_interval_counts) {
@@ -181,7 +168,10 @@ void _do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected
       std::cout << "----------------------------------------\n";
       std::cout << "Main matrix size: " << main_matrix.rows() << "x" << main_matrix.cols() << '\n';
       std::cout << "G vector size: " << g_vector.size() << '\n';
-      Eigen::MatrixXd solution = main_matrix.fullPivLu().solve(g_vector);
+      // Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+      // solver.compute(main_matrix);
+      // Eigen::VectorXd solution = solver.solve(g_vector);
+      Eigen::VectorXd solution = odd_even_reduction_solver(main_matrix, g_vector);
       std::cout << "Solution: \n" << solution << '\n';
       auto v_matrix = convert_w_to_v(solution, calc);
       std::cout << "Solution in v coordinates: \n" << v_matrix << '\n';
@@ -213,7 +203,7 @@ void basic_example()
 
   auto expected_func = [](double x, double y) { return 3 * x * x * x + 2 * y * y * y; };
 
-  _do_all(params, expected_func);
+  do_all1(params, expected_func);
 }
 
 int main()

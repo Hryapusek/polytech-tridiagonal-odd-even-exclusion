@@ -1,0 +1,2318 @@
+====================================
+File: ./external/src/contract/test/contract_error.hpp
+====================================
+#ifndef included_contract_error_hpp__
+#define included_contract_error_hpp__
+
+#include <contract/contract.hpp>
+
+#include <boost/test/unit_test.hpp>
+
+#include <exception>
+#include <stdexcept>
+#include <sstream>
+#include <string>
+
+namespace test
+{
+
+struct non_contract_error {};
+
+struct contract_error : std::exception
+{
+    contract_error(contract::violation_context const & context)
+        : context_{context}
+    {
+        std::ostringstream err;
+        err << context.file << ':' << context.line
+            << ": error: contract violation of type '";
+
+        char const * type_str;
+
+        switch (context.contract_type)
+        {
+        case contract::type::precondition:
+            type_str = "precondition";
+            break;
+        case contract::type::postcondition:
+            type_str = "postcondition";
+            break;
+        case contract::type::invariant:
+            type_str = "invariant";
+            break;
+        }
+
+        err << type_str << "'\n"
+            << "message:   " << context.message << "\n"
+            << "condition: " << context.condition << std::endl;
+
+        error_ = err.str();
+    }
+
+    char const * what() const noexcept override
+    {
+        return error_.c_str();
+    }
+
+    contract::type type() const { return context_.contract_type; }
+    char const * message() const { return context_.message; }
+    char const * condition() const { return context_.condition; }
+    char const * file() const { return context_.file; }
+    std::size_t line() const { return context_.line; }
+
+private:
+    contract::violation_context context_;
+    std::string error_;
+};
+
+inline
+void throw_contract_error(contract::violation_context const & context)
+{
+    throw contract_error(context);
+}
+
+template <typename = void>
+struct terminate_holder
+{
+    static
+    std::terminate_handler default_terminate;
+};
+
+template <typename T>
+std::terminate_handler terminate_holder<T>::default_terminate{nullptr};
+
+inline
+void terminate()
+{
+    terminate_holder<>::default_terminate();
+}
+
+struct contract_handler_frame
+{
+    contract_handler_frame()
+        : old_handler_{contract::set_handler(throw_contract_error)}
+    {
+        terminate_holder<>::default_terminate = std::set_terminate(terminate);
+    }
+
+    ~contract_handler_frame()
+    {
+        contract::set_handler(old_handler_);
+        std::set_terminate(terminate_holder<>::default_terminate);
+    }
+
+    contract::violation_handler old_handler_;
+};
+
+template <typename Func>
+void check_throw_on_contract_violation(Func f, contract::type type)
+{
+    bool caught_exception = false;
+
+    try
+    {
+        f();
+    }
+    catch (test::contract_error & e)
+    {
+        caught_exception = true;
+        BOOST_CHECK(e.type() == type);
+    }
+    catch (...)
+    {
+        caught_exception = true;
+        BOOST_FAIL("expected to catch test::contract_error");
+    }
+
+    BOOST_CHECK(caught_exception);
+}
+
+template <typename Func>
+void check_throw_on_contract_violation(Func f, contract::type type, char const * msg)
+{
+    bool caught_exception = false;
+
+    try
+    {
+        f();
+    }
+    catch (test::contract_error & e)
+    {
+        caught_exception = true;
+        BOOST_CHECK(e.type() == type);
+        BOOST_CHECK(e.message() == std::string(msg));
+    }
+    catch (...)
+    {
+        caught_exception = true;
+        BOOST_FAIL("expected to catch test::contract_error");
+    }
+
+    BOOST_CHECK(caught_exception);
+}
+
+}
+
+// Copyright Alexei Zakharov, 2013.
+//
+// Distributed under the Boost Software License, Version 1.0.
+// (See accompanying file LICENSE_1_0.txt or copy at
+// http://www.boost.org/LICENSE_1_0.txt)
+
+#endif
+
+
+====================================
+File: ./external/src/contract/include/contract/detail/contract_imp.hpp
+====================================
+#ifndef included_contract_imp_hpp__
+#define included_contract_imp_hpp__
+
+#include <type_traits>
+#include <iostream>
+#include <exception>
+
+// implementation: macros
+//
+
+// Define contract for a free function.
+#define contract_fun__                                                       \
+    auto contract_obj__ =                                                    \
+        contract::detail::contractor<void *>(0)                              \
+        + [&](contract::detail::contract_context const & contract_context__) \
+
+// Define contract for a method.
+#define contract_this__                                                      \
+    auto contract_obj__ =                                                    \
+        contract::detail::contractor<                                        \
+            std::remove_reference<decltype(*this)>::type>(this)              \
+        + [&](contract::detail::contract_context const & contract_context__) \
+
+// Define contract for a constructor.
+#define contract_ctor__                                                      \
+    auto contract_obj__ =                                                    \
+        contract::detail::contractor<                                        \
+            std::remove_reference<decltype(*this)>::type>(                   \
+                this, false, true)                                           \
+        + [&](contract::detail::contract_context const & contract_context__) \
+
+// Define contract for a destructor.
+#define contract_dtor__                                                      \
+    auto contract_obj__ =                                                    \
+        contract::detail::contractor<                                        \
+            std::remove_reference<decltype(*this)>::type>(                   \
+                this, true, false)                                           \
+        + [&](contract::detail::contract_context const & contract_context__) \
+
+// Define a class contract.
+#define contract_class__                                                     \
+    template <typename T>                                                    \
+    friend struct contract::detail::class_contract_base;                     \
+                                                                             \
+    template <typename T>                                                    \
+    friend struct contract::detail::has_class_contract;                      \
+                                                                             \
+    template <typename ...Bases>                                             \
+    friend struct contract::detail::base_class_contract;                     \
+                                                                             \
+    contract::detail::contract_context prepare_contract__(                   \
+        contract::detail::contract_context const & contract_context__) const \
+    {                                                                        \
+        return contract_context__;                                           \
+    }                                                                        \
+                                                                             \
+    void class_contract__(                                                   \
+        contract::detail::contract_context const & contract_context__) const \
+
+// Define a derived class contract.
+#define contract_derived__(...)                                              \
+    template <typename T>                                                    \
+    friend struct contract::detail::class_contract_base;                     \
+                                                                             \
+    template <typename T>                                                    \
+    friend struct contract::detail::has_class_contract;                      \
+                                                                             \
+    template <typename ...Bases>                                             \
+    friend struct contract::detail::base_class_contract;                     \
+                                                                             \
+    contract::detail::contract_context prepare_contract__(                   \
+        contract::detail::contract_context const & contract_context__) const \
+    {                                                                        \
+        contract::detail::base_class_contract<__VA_ARGS__>                   \
+            ::enforce(this, contract_context__);                             \
+        return contract_context__;                                           \
+    }                                                                        \
+                                                                             \
+    void class_contract__(                                                   \
+        contract::detail::contract_context const & contract_context__) const \
+
+
+// Define a loop invariant contract.
+#define contract_loop__                                                      \
+    if (contract::detail::contract_context                                   \
+        contract_context__{false, false, true})                              \
+
+// Contract check main implementation.
+#define contract_check__(TYPE, COND, MSG)                                    \
+    do {                                                                     \
+        if (contract_context__.check_ ## TYPE () && !(COND))                 \
+            contract::handle_violation(                                      \
+                contract::violation_context(contract::type:: TYPE,           \
+                                            MSG,                             \
+                                            #COND,                           \
+                                            __FILE__,                        \
+                                            __LINE__));                      \
+    } while (0)                                                              \
+
+// macros for variadic argument dispatch
+
+#define arg_count__(...) arg_pos__(__VA_ARGS__, 5, 4, 3, 2, 1)
+#define arg_pos__(                          _1,_2,_3,_4,_5, N, ...)  N
+
+#define concat__(macro, argc)   concat2__(macro, argc)
+#define concat2__(macro, argc)  macro ## argc
+
+namespace contract
+{
+namespace detail
+{
+
+// implementation: code behind macros
+//
+
+inline bool has_active_exceptions()
+{
+#if __cpp_lib_uncaught_exceptions >= 201411L
+    return std::uncaught_exceptions() > 0;
+#else
+    return std::uncaught_exception();
+#endif
+}
+
+// Context in which a contract check is done.  Controls which parts of the
+// contract are checked.
+struct contract_context
+{
+    contract_context(bool pre, bool post, bool inv)
+        : check_pre{pre}
+        , check_post{post}
+        , check_inv{inv}
+    {}
+
+    explicit
+    operator bool() { return true; }
+
+    bool check_precondition()  const { return check_pre; }
+    bool check_postcondition() const { return check_post && !has_active_exceptions(); }
+    bool check_invariant()     const { return check_inv; }
+
+    bool check_pre;
+    bool check_post;
+    bool check_inv;
+};
+
+// Performs the check for a function or method contract.  Parameterized with
+// `ContrFunc` functor defining the actual contract in terms of <precondition>,
+// <postcondition> and <invariant> macros.  Precondition is checked on function
+// entry, postcondition is checked on function exit, and invariant is checked
+// on both entry and exit unless specified otherwise.
+template <typename ContrFunc>
+struct fun_contract
+{
+    explicit
+    fun_contract(ContrFunc f, bool enter = true, bool exit = true)
+        : contr_(f)
+        , exit_{exit}
+    {
+        contr_(contract_context{true, false, enter});
+    }
+
+    ~fun_contract() noexcept(false)
+    {
+        contr_(contract_context{false, true, exit_});
+    }
+
+    ContrFunc contr_;
+    bool exit_;
+};
+
+// A base class that performs the check for a class contract.  Parameterized
+// with `ContrFunc` functor defining the actual contract in terms of
+// <precondition>, <postcondition> and <invariant> macros.  Precondition and
+// postcondition are not checked.  Invariant is checked on entry and exit if
+// specified.
+template <typename T>
+struct class_contract_base
+{
+    class_contract_base(T const * obj, bool enter, bool exit)
+        : obj_{obj}
+        , exit_{exit}
+    {
+        if (enter)
+            obj_->class_contract__(
+                obj_->prepare_contract__(contract_context{false, false, true}));
+    }
+
+    ~class_contract_base() noexcept(false)
+    {
+        if (exit_ && !has_active_exceptions())
+            obj_->class_contract__(
+                obj_->prepare_contract__(contract_context{false, false, true}));
+    }
+
+    T const * obj_;
+    bool exit_;
+};
+
+// Performs the check for a method and class contract.  Combines the
+// functionality of <class_contract_base> and <fun_contract> classes.
+template <typename T, typename ContrFunc>
+struct class_contract
+    : class_contract_base<T>
+    , fun_contract<ContrFunc>
+{
+    using class_base = class_contract_base<T>;
+    using fun_base = fun_contract<ContrFunc>;
+
+    class_contract(T const * obj, ContrFunc f, bool enter, bool exit)
+        : class_base{obj, enter, exit}
+        , fun_base{f, enter, exit}
+    {}
+};
+
+// Template metafunction that detects if a class has a class contract defined.
+// Defines `type` as `std::true_type` if the class contract is detected and
+// `std::false_type` otherwise.
+template <typename T>
+struct has_class_contract
+{
+    template <typename U>
+    static auto test(int) -> decltype(std::declval<U>().class_contract__(
+                                          std::declval<contract_context>()),
+                                      std::true_type{});
+    template <typename U>
+    static auto test(...) -> std::false_type;
+
+    using type = decltype(test<T>(0));
+};
+
+// Enforces base class contracts for a derived class.
+//
+// `Bases`   - the list of base class types with class contracts that should be
+//             enforced as part of the derived class contract.
+// `Derived` - the class derived from each of the `Bases`.
+template <typename ...Bases>
+struct base_class_contract
+{
+    template <typename Derived>
+    static
+    void enforce(Derived * obj, contract_context const & context) {}
+};
+
+template <typename Base, typename ...Bases>
+struct base_class_contract<Base, Bases...>
+{
+    template <typename T>
+    static
+    void do_enforce(T * obj, contract_context const & context,
+                    typename std::enable_if<has_class_contract<T>::type::value>::type * = 0)
+    {
+        obj->class_contract__(context);
+    }
+
+    template <typename T>
+    static
+    void do_enforce(T * obj, contract_context const & context,
+                    typename std::enable_if<! has_class_contract<T>::type::value>::type * = 0)
+    {}
+
+    template <typename Derived>
+    static
+    void enforce(Derived * obj, contract_context const & context)
+    {
+        do_enforce(static_cast<typename std::add_const<Base>::type *>(obj), context);
+        base_class_contract<Bases...>::enforce(obj, context);
+    }
+};
+
+// Defines a bootstrapper for a contract check implementation.  When combined
+// with a `Func` functor defining the actual contract (by means of overloaded
+// `operator+`) produces a concrete implementation for the contract check.
+template <typename T, bool = has_class_contract<T>::type::value>
+struct contractor;
+
+// Specialization for a function contract or a method contract without a class
+// contract.
+template <typename T>
+struct contractor<T, false>
+{
+    explicit
+    contractor(T const *, bool = true, bool = true) {}
+
+    template <typename Func>
+    fun_contract<Func> operator+(Func f) const
+    {
+        return fun_contract<Func>{f, true, true};
+    }
+};
+
+// Specialization for a method contract with a class contract.
+template <typename T>
+struct contractor<T, true>
+{
+    explicit
+    contractor(T const * obj, bool enter = true, bool exit = true)
+        : obj_{obj}
+        , enter_{enter}
+        , exit_{exit}
+    {}
+
+    template<typename Func>
+    class_contract<T, Func> operator+(Func f) const
+    {
+        return class_contract<T, Func>{obj_, f, enter_, exit_};
+    }
+
+    T const * obj_;
+    bool enter_;
+    bool exit_;
+};
+
+// implementation: violation handler
+//
+
+// Defines a default contract violation handler.  Prints the information about
+// the contract violation to the standard error and abort the program
+// execution.
+inline
+void default_handler(violation_context const & context)
+{
+    std::cerr << context.file << ':' << context.line
+              << ": error: contract violation of type '";
+
+    char const * type_str;
+
+    switch (context.contract_type)
+    {
+    case type::precondition:
+        type_str = "precondition";
+        break;
+    case type::postcondition:
+        type_str = "postcondition";
+        break;
+    case type::invariant:
+        type_str = "invariant";
+        break;
+    }
+
+    std::cerr << type_str << "'\n"
+              << "message:   " << context.message << "\n"
+              << "condition: " << context.condition << std::endl;
+
+    std::terminate();
+}
+
+// Holder for the currently installed contract failure handler.
+// Templated with a dummy type to be able to keep it in the header file.
+template <typename = void>
+struct handler_holder
+{
+    static
+    violation_handler current_handler;
+};
+
+template <typename T>
+violation_handler handler_holder<T>::current_handler{default_handler};
+
+}  // namespace detail
+
+inline
+void handle_violation(violation_context const & context)
+{
+    detail::handler_holder<>::current_handler(context);
+
+    // if the handler returns, abort anyway to satisfy the [[noreturn]] contract
+    std::terminate();
+}
+
+inline
+violation_handler set_handler(violation_handler new_handler)
+{
+    violation_handler old_handler = detail::handler_holder<>::current_handler;
+    detail::handler_holder<>::current_handler = new_handler;
+    return old_handler;
+}
+
+inline
+violation_handler get_handler()
+{
+    return detail::handler_holder<>::current_handler;
+}
+
+}  // namespace contract
+
+// Copyright Alexei Zakharov, 2013.
+//
+// Distributed under the Boost Software License, Version 1.0.
+// (See accompanying file LICENSE_1_0.txt or copy at
+// http://www.boost.org/LICENSE_1_0.txt)
+
+#endif
+
+
+====================================
+File: ./external/src/contract/include/contract/detail/version.hpp
+====================================
+#ifndef included_version_hpp__
+#define included_version_hpp__
+
+#define stringify__(x)     stringify_imp__(x)
+#define stringify_imp__(x) #x
+
+#define CONTRACT_LIB_VERSION_MAJOR 0
+#define CONTRACT_LIB_VERSION_MINOR 2
+#define CONTRACT_LIB_VERSION_PATCH 3
+
+#define CONTRACT_LIB_VERSION_STRING              \
+    stringify__(CONTRACT_LIB_VERSION_MAJOR) "."  \
+    stringify__(CONTRACT_LIB_VERSION_MINOR) "."  \
+    stringify__(CONTRACT_LIB_VERSION_PATCH)      \
+
+#define CONTRACT_LIB_VERSION             \
+    CONTRACT_LIB_VERSION_MAJOR * 10000 + \
+    CONTRACT_LIB_VERSION_MINOR * 100 +   \
+    CONTRACT_LIB_VERSION_PATCH           \
+
+// Copyright Alexei Zakharov, 2013.
+//
+// Distributed under the Boost Software License, Version 1.0.
+// (See accompanying file LICENSE_1_0.txt or copy at
+// http://www.boost.org/LICENSE_1_0.txt)
+
+#endif
+
+
+====================================
+File: ./external/src/contract/include/contract/contract.hpp
+====================================
+#ifndef included_contract_hpp__
+#define included_contract_hpp__
+
+#include <contract/detail/version.hpp>
+
+#include <functional>
+#include <cstddef>
+
+// interface: macros
+//
+
+// Define contract block.
+//
+// This macro defines a contract block for a specified `scope`.
+//
+// @scope  the scope of the contract:
+//             `class`   - defines a contract for a class,
+//             `derived` - defines a contract for a derived class,
+//             `this`    - defines a contract for a method,
+//             `ctor`    - defines a contract for a constructor,
+//             `dtor`    - defines a contract for a destructor,
+//             `fun`     - defines a free function contract,
+//             `loop`    - defines a loop invariant contract.
+#define contract(scope)           contract_ ## scope ## __
+
+// Define precondition contract.
+//
+// This macro defines a precondition check for a contract block defined by the
+// `contract(...)` macro.  Precondition is checked in the following situations:
+//   `this`  - on method entry,
+//   `ctor`  - on constructor entry,
+//   `dtor`  - on destructor entry,
+//   `fun`   - on function entry,
+//   `loop`  - not checked.
+//
+// @cond  precondition expression that should evalate to `true`.
+// @msg   message which is reported to the contract violation handler if `cond`
+//        evaluates to `false`.
+//
+// Use macro `CONTRACT_DISABLE_PRECONDITIONS` to disable precondition checking.
+#define precondition(...)         concat__(precondition, arg_count__(__VA_ARGS__)) \
+                                      (__VA_ARGS__)
+#define precondition1(cond)       precondition2(cond, #cond)
+
+#if !defined(CONTRACT_DISABLE_PRECONDITIONS)
+#   define precondition2(cond, msg) contract_check__(precondition, cond, msg)
+#else
+#   define precondition2(cond, msg) do {} while (false && (cond))
+#endif
+
+// Define postcondition contract.
+//
+// This macro defines a postcondition check for a contract block defined by the
+// `contract(...)` macro.  Precondition is checked in the following situations:
+//   `this`  - on method exit,
+//   `ctor`  - on constructor exit,
+//   `dtor`  - on destructor exit,
+//   `fun`   - on function exit,
+//   `loop`  - not checked.
+//
+// @cond  postcondition expression that should evalate to `true`.
+// @msg   message which is reported to the contract violation handler if `cond`
+//        evaluates to `false`.
+//
+// Use macro `CONTRACT_DISABLE_POSTCONDITIONS` to disable precondition checking.
+#define postcondition(...)        concat__(postcondition, arg_count__(__VA_ARGS__)) \
+                                      (__VA_ARGS__)
+#define postcondition1(cond)      postcondition2(cond, #cond)
+
+#if !defined(CONTRACT_DISABLE_POSTCONDITIONS)
+#   define postcondition2(cond, msg) contract_check__(postcondition, cond, msg)
+#else
+#   define postcondition2(cond, msg) do {} while (false && (cond))
+#endif
+
+// Define invariant contract.
+//
+// This macro defines an invariant check for a contract block defined by the
+// `contract(...)` macro.  Invariant is checked in the following situations:
+//   `class`   - on entry and exit of each method with a `contract(this) block,
+//               on exit of constructors with a `contract(ctor)` block, unless
+//                  an exception is thrown,
+//               on entry to destructors with a `contract(dtor)` block,
+//   `derived` - on entry and exit of each method with a `contract(this) block,
+//               on exit of constructors with a `contract(ctor)` block unless
+//                  an exception is thrown,
+//               on entry to destructors with a `contract(dtor)` block,
+//   `this`    - on method entry and exit,
+//   `ctor`    - on constructor exit,
+//   `dtor`    - on destructor entry,
+//   `fun`     - on function entry and exit,
+//   `loop`    - on each loop iteration.
+//
+// @cond  postcondition expression that should evalate to `true`.
+// @msg   message which is reported to the contract violation handler if `cond`
+//        evaluates to `false`.
+//
+// Use macro `CONTRACT_DISABLE_INVARIANTS` to disable precondition checking.
+#define invariant(...)            concat__(invariant, arg_count__(__VA_ARGS__)) \
+                                      (__VA_ARGS__)
+#define invariant1(cond)          invariant2(cond, #cond)
+
+#if !defined(CONTRACT_DISABLE_INVARIANTS)
+#   define invariant2(cond, msg) contract_check__(invariant, cond, msg)
+#else
+#   define invariant2(cond, msg) do {} while (false && (cond))
+#endif
+
+namespace contract
+{
+
+// interface: violation handler
+//
+
+// Values for types of contract checks.
+//
+// Enumeration that defines the values for types of contract checks.  These
+// types correspond to the identically named contract check macros.  This
+// enumeration is not usable directly.  Instead, contract check macros pass the
+// appropriate enumeration value to the contractor of the <violation_context>
+// class.
+enum class type
+{
+    precondition,
+    postcondition,
+    invariant
+};
+
+// Context of the contract violation.
+//
+// Defines the context data passed to the <handle_violation> function when a
+// contract check macro detects a contract violation.
+struct violation_context
+{
+    violation_context(contract::type t,
+                      char const * m,
+                      char const * c,
+                      char const * f,
+                      std::size_t l)
+        : contract_type{t}
+        , message{m}
+        , condition{c}
+        , file{f}
+        , line{l}
+    {}
+
+    contract::type contract_type; // type of the failed contract check macro
+    char const * message;         // message passed to the contract check macro
+    char const * condition;       // condition of the contract check
+    char const * file;            // file in which the contract check occures
+    std::size_t line;             // line on which the contact check occures
+};
+
+// Handle contract violation.
+//
+// Handle the contract violation.  A contract is violated when a condition
+// expression passed to a contract check macro evaluates to `false`.
+//
+// @context  the context data for the contract violation.
+// @returns  this function doesn't return; it can either call another
+//           `[[noreturn]]` function or exit via an exception.
+[[noreturn]]
+void handle_violation(violation_context const & context);
+
+// Type alias for the contract violation handler function.
+using violation_handler = std::function<void (violation_context const &)>;
+
+// Set contract violation handler.
+//
+// Set the handler function which is invoked when a contract violation is
+// detected by a contract check macro.
+//
+// @new_handler  new handler function.
+// @returns      previous handler function.
+violation_handler set_handler(violation_handler new_handler);
+
+// Get current contract violation handler.
+//
+// Get the handler function which is invoked when a contract violation is
+// detect by a contract check macro.
+//
+// @returns  current contract violation handler function.
+violation_handler get_handler();
+
+}  // namespace contract
+
+#include <contract/detail/contract_imp.hpp>
+
+// Copyright Alexei Zakharov, 2013.
+//
+// Distributed under the Boost Software License, Version 1.0.
+// (See accompanying file LICENSE_1_0.txt or copy at
+// http://www.boost.org/LICENSE_1_0.txt)
+
+#endif
+
+
+====================================
+File: ./external/src/eigen/bench/tensors/tensor_benchmarks_sycl.cc
+====================================
+#ifdef EIGEN_USE_SYCL
+
+#include <SYCL/sycl.hpp>
+#include <iostream>
+
+#include "tensor_benchmarks.h"
+
+#define BM_FuncGPU(FUNC)                                                       \
+  static void BM_##FUNC(int iters, int N) {                                    \
+    StopBenchmarkTiming();                                                     \
+    cl::sycl::gpu_selector selector;                                           \
+    Eigen::QueueInterface queue(selector);                                     \
+    Eigen::SyclDevice device(&queue);                                          \
+    BenchmarkSuite<Eigen::SyclDevice, float> suite(device, N);                 \
+    suite.FUNC(iters);                                                         \
+  }                                                                            \
+  BENCHMARK_RANGE(BM_##FUNC, 10, 5000);
+
+BM_FuncGPU(memcpy);
+BM_FuncGPU(typeCasting);
+BM_FuncGPU(slicing);
+BM_FuncGPU(rowChip);
+BM_FuncGPU(colChip);
+BM_FuncGPU(shuffling);
+BM_FuncGPU(padding);
+BM_FuncGPU(striding);
+BM_FuncGPU(broadcasting);
+BM_FuncGPU(coeffWiseOp);
+BM_FuncGPU(algebraicFunc);
+BM_FuncGPU(transcendentalFunc);
+BM_FuncGPU(rowReduction);
+BM_FuncGPU(colReduction);
+BM_FuncGPU(fullReduction);
+
+
+// Contractions
+#define BM_FuncWithInputDimsGPU(FUNC, D1, D2, D3)                              \
+  static void BM_##FUNC##_##D1##x##D2##x##D3(int iters, int N) {               \
+    StopBenchmarkTiming();                                                     \
+    cl::sycl::gpu_selector selector;                                           \
+    Eigen::QueueInterface queue(selector);                                     \
+    Eigen::SyclDevice device(&queue);                                          \
+    BenchmarkSuite<Eigen::SyclDevice, float> suite(device, D1, D2, D3);        \
+    suite.FUNC(iters);                                                         \
+  }                                                                            \
+  BENCHMARK_RANGE(BM_##FUNC##_##D1##x##D2##x##D3, 10, 5000);
+
+
+BM_FuncWithInputDimsGPU(contraction, N, N, N);
+BM_FuncWithInputDimsGPU(contraction, 64, N, N);
+BM_FuncWithInputDimsGPU(contraction, N, 64, N);
+BM_FuncWithInputDimsGPU(contraction, N, N, 64);
+
+
+// Convolutions
+#define BM_FuncWithKernelDimsGPU(FUNC, DIM1, DIM2)                             \
+  static void BM_##FUNC##_##DIM1##x##DIM2(int iters, int N) {                  \
+    StopBenchmarkTiming();                                                     \
+    cl::sycl::gpu_selector selector;                                           \
+    Eigen::QueueInterface queue(selector);                                     \
+    Eigen::SyclDevice device(&queue);                                          \
+    BenchmarkSuite<Eigen::SyclDevice, float> suite(device, N);                 \
+    suite.FUNC(iters, DIM1, DIM2);                                             \
+  }                                                                            \
+  BENCHMARK_RANGE(BM_##FUNC##_##DIM1##x##DIM2, 128, 5000);
+
+BM_FuncWithKernelDimsGPU(convolution, 7, 1);
+BM_FuncWithKernelDimsGPU(convolution, 1, 7);
+BM_FuncWithKernelDimsGPU(convolution, 7, 4);
+BM_FuncWithKernelDimsGPU(convolution, 4, 7);
+BM_FuncWithKernelDimsGPU(convolution, 7, 64);
+BM_FuncWithKernelDimsGPU(convolution, 64, 7);
+#endif
+
+
+====================================
+File: ./external/src/eigen/bench/tensors/benchmark_main.cc
+====================================
+/*
+ * Copyright (C) 2012 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#include "benchmark.h"
+#include <regex.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <string>
+#include <inttypes.h>
+#include <time.h>
+#include <map>
+
+static int64_t g_flops_processed;
+static int64_t g_benchmark_total_time_ns;
+static int64_t g_benchmark_start_time_ns;
+typedef std::map<std::string, ::testing::Benchmark*> BenchmarkMap;
+typedef BenchmarkMap::iterator BenchmarkMapIt;
+
+BenchmarkMap& gBenchmarks() {
+  static BenchmarkMap g_benchmarks;
+  return g_benchmarks;
+}
+
+static int g_name_column_width = 20;
+
+static int Round(int n) {
+  int base = 1;
+  while (base*10 < n) {
+    base *= 10;
+  }
+  if (n < 2*base) {
+    return 2*base;
+  }
+  if (n < 5*base) {
+    return 5*base;
+  }
+  return 10*base;
+}
+
+#ifdef __APPLE__
+  #include <mach/mach_time.h>
+  static mach_timebase_info_data_t g_time_info;
+  static void __attribute__((constructor)) init_info() {
+    mach_timebase_info(&g_time_info);
+  }
+#endif
+
+static int64_t NanoTime() {
+#if defined(__APPLE__)
+  uint64_t t = mach_absolute_time();
+  return t * g_time_info.numer / g_time_info.denom;
+#else
+  struct timespec t;
+  t.tv_sec = t.tv_nsec = 0;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return static_cast<int64_t>(t.tv_sec) * 1000000000LL + t.tv_nsec;
+#endif
+}
+
+namespace testing {
+Benchmark* Benchmark::Arg(int arg) {
+  args_.push_back(arg);
+  return this;
+}
+
+Benchmark* Benchmark::Range(int lo, int hi) {
+  const int kRangeMultiplier = 8;
+  if (hi < lo) {
+    int temp = hi;
+    hi = lo;
+    lo = temp;
+  }
+  while (lo < hi) {
+    args_.push_back(lo);
+    lo *= kRangeMultiplier;
+  }
+  // We always run the hi number.
+  args_.push_back(hi);
+  return this;
+}
+
+const char* Benchmark::Name() {
+  return name_;
+}
+bool Benchmark::ShouldRun(int argc, char* argv[]) {
+  if (argc == 1) {
+    return true;  // With no arguments, we run all benchmarks.
+  }
+  // Otherwise, we interpret each argument as a regular expression and
+  // see if any of our benchmarks match.
+  for (int i = 1; i < argc; i++) {
+    regex_t re;
+    if (regcomp(&re, argv[i], 0) != 0) {
+      fprintf(stderr, "couldn't compile \"%s\" as a regular expression!\n", argv[i]);
+      exit(EXIT_FAILURE);
+    }
+    int match = regexec(&re, name_, 0, NULL, 0);
+    regfree(&re);
+    if (match != REG_NOMATCH) {
+      return true;
+    }
+  }
+  return false;
+}
+void Benchmark::Register(const char* name, void (*fn)(int), void (*fn_range)(int, int)) {
+  name_ = name;
+  fn_ = fn;
+  fn_range_ = fn_range;
+  if (fn_ == NULL && fn_range_ == NULL) {
+    fprintf(stderr, "%s: missing function\n", name_);
+    exit(EXIT_FAILURE);
+  }
+  gBenchmarks().insert(std::make_pair(name, this));
+}
+void Benchmark::Run() {
+  if (fn_ != NULL) {
+    RunWithArg(0);
+  } else {
+    if (args_.empty()) {
+      fprintf(stderr, "%s: no args!\n", name_);
+      exit(EXIT_FAILURE);
+    }
+    for (size_t i = 0; i < args_.size(); ++i) {
+      RunWithArg(args_[i]);
+    }
+  }
+}
+void Benchmark::RunRepeatedlyWithArg(int iterations, int arg) {
+  g_flops_processed = 0;
+  g_benchmark_total_time_ns = 0;
+  g_benchmark_start_time_ns = NanoTime();
+  if (fn_ != NULL) {
+    fn_(iterations);
+  } else {
+    fn_range_(iterations, arg);
+  }
+  if (g_benchmark_start_time_ns != 0) {
+    g_benchmark_total_time_ns += NanoTime() - g_benchmark_start_time_ns;
+  }
+}
+void Benchmark::RunWithArg(int arg) {
+  // run once in case it's expensive
+  int iterations = 1;
+  RunRepeatedlyWithArg(iterations, arg);
+  while (g_benchmark_total_time_ns < 1e9 && iterations < 1e9) {
+    int last = iterations;
+    if (g_benchmark_total_time_ns/iterations == 0) {
+      iterations = 1e9;
+    } else {
+      iterations = 1e9 / (g_benchmark_total_time_ns/iterations);
+    }
+    iterations = std::max(last + 1, std::min(iterations + iterations/2, 100*last));
+    iterations = Round(iterations);
+    RunRepeatedlyWithArg(iterations, arg);
+  }
+  char throughput[100];
+  throughput[0] = '\0';
+  if (g_benchmark_total_time_ns > 0 && g_flops_processed > 0) {
+    double mflops_processed = static_cast<double>(g_flops_processed)/1e6;
+    double seconds = static_cast<double>(g_benchmark_total_time_ns)/1e9;
+    snprintf(throughput, sizeof(throughput), " %8.2f MFlops/s", mflops_processed/seconds);
+  }
+  char full_name[100];
+  if (fn_range_ != NULL) {
+    if (arg >= (1<<20)) {
+      snprintf(full_name, sizeof(full_name), "%s/%dM", name_, arg/(1<<20));
+    } else if (arg >= (1<<10)) {
+      snprintf(full_name, sizeof(full_name), "%s/%dK", name_, arg/(1<<10));
+    } else {
+      snprintf(full_name, sizeof(full_name), "%s/%d", name_, arg);
+    }
+  } else {
+    snprintf(full_name, sizeof(full_name), "%s", name_);
+  }
+  printf("%-*s %10d %10" PRId64 "%s\n", g_name_column_width, full_name,
+         iterations, g_benchmark_total_time_ns/iterations, throughput);
+  fflush(stdout);
+}
+}  // namespace testing
+void SetBenchmarkFlopsProcessed(int64_t x) {
+  g_flops_processed = x;
+}
+void StopBenchmarkTiming() {
+  if (g_benchmark_start_time_ns != 0) {
+    g_benchmark_total_time_ns += NanoTime() - g_benchmark_start_time_ns;
+  }
+  g_benchmark_start_time_ns = 0;
+}
+void StartBenchmarkTiming() {
+  if (g_benchmark_start_time_ns == 0) {
+    g_benchmark_start_time_ns = NanoTime();
+  }
+}
+int main(int argc, char* argv[]) {
+  if (gBenchmarks().empty()) {
+    fprintf(stderr, "No benchmarks registered!\n");
+    exit(EXIT_FAILURE);
+  }
+  for (BenchmarkMapIt it = gBenchmarks().begin(); it != gBenchmarks().end(); ++it) {
+    int name_width = static_cast<int>(strlen(it->second->Name()));
+    g_name_column_width = std::max(g_name_column_width, name_width);
+  }
+  bool need_header = true;
+  for (BenchmarkMapIt it = gBenchmarks().begin(); it != gBenchmarks().end(); ++it) {
+    ::testing::Benchmark* b = it->second;
+    if (b->ShouldRun(argc, argv)) {
+      if (need_header) {
+        printf("%-*s %10s %10s\n", g_name_column_width, "", "iterations", "ns/op");
+        fflush(stdout);
+        need_header = false;
+      }
+      b->Run();
+    }
+  }
+  if (need_header) {
+    fprintf(stderr, "No matching benchmarks!\n");
+    fprintf(stderr, "Available benchmarks:\n");
+    for (BenchmarkMapIt it = gBenchmarks().begin(); it != gBenchmarks().end(); ++it) {
+      fprintf(stderr, "  %s\n", it->second->Name());
+    }
+    exit(EXIT_FAILURE);
+  }
+  return 0;
+}
+
+
+====================================
+File: ./external/src/eigen/bench/tensors/tensor_benchmarks_sycl_include_headers.cc
+====================================
+#include "tensor_benchmarks_sycl.cc"
+#include "tensor_benchmarks_sycl.sycl"
+
+
+====================================
+File: ./external/src/eigen/bench/tensors/tensor_benchmarks_cpu.cc
+====================================
+#define EIGEN_USE_THREADS
+
+#include <string>
+
+#include "tensor_benchmarks.h"
+
+#define CREATE_THREAD_POOL(threads)             \
+Eigen::ThreadPool pool(threads);                \
+Eigen::ThreadPoolDevice device(&pool, threads);
+
+// Simple functions
+#define BM_FuncCPU(FUNC, THREADS)                                    \
+  static void BM_##FUNC##_##THREADS##T(int iters, int N) {           \
+    StopBenchmarkTiming();                                           \
+    CREATE_THREAD_POOL(THREADS);                                     \
+    BenchmarkSuite<Eigen::ThreadPoolDevice, float> suite(device, N); \
+    suite.FUNC(iters);                                               \
+  }                                                                  \
+  BENCHMARK_RANGE(BM_##FUNC##_##THREADS##T, 10, 5000);
+
+BM_FuncCPU(memcpy, 4);
+BM_FuncCPU(memcpy, 8);
+BM_FuncCPU(memcpy, 12);
+
+BM_FuncCPU(typeCasting, 4);
+BM_FuncCPU(typeCasting, 8);
+BM_FuncCPU(typeCasting, 12);
+
+BM_FuncCPU(random, 4);
+BM_FuncCPU(random, 8);
+BM_FuncCPU(random, 12);
+
+BM_FuncCPU(slicing, 4);
+BM_FuncCPU(slicing, 8);
+BM_FuncCPU(slicing, 12);
+
+BM_FuncCPU(rowChip, 4);
+BM_FuncCPU(rowChip, 8);
+BM_FuncCPU(rowChip, 12);
+
+BM_FuncCPU(colChip, 4);
+BM_FuncCPU(colChip, 8);
+BM_FuncCPU(colChip, 12);
+
+BM_FuncCPU(shuffling, 4);
+BM_FuncCPU(shuffling, 8);
+BM_FuncCPU(shuffling, 12);
+
+BM_FuncCPU(padding, 4);
+BM_FuncCPU(padding, 8);
+BM_FuncCPU(padding, 12);
+
+BM_FuncCPU(striding, 4);
+BM_FuncCPU(striding, 8);
+BM_FuncCPU(striding, 12);
+
+BM_FuncCPU(broadcasting, 4);
+BM_FuncCPU(broadcasting, 8);
+BM_FuncCPU(broadcasting, 12);
+
+BM_FuncCPU(coeffWiseOp, 4);
+BM_FuncCPU(coeffWiseOp, 8);
+BM_FuncCPU(coeffWiseOp, 12);
+
+BM_FuncCPU(algebraicFunc, 4);
+BM_FuncCPU(algebraicFunc, 8);
+BM_FuncCPU(algebraicFunc, 12);
+
+BM_FuncCPU(transcendentalFunc, 4);
+BM_FuncCPU(transcendentalFunc, 8);
+BM_FuncCPU(transcendentalFunc, 12);
+
+BM_FuncCPU(rowReduction, 4);
+BM_FuncCPU(rowReduction, 8);
+BM_FuncCPU(rowReduction, 12);
+
+BM_FuncCPU(colReduction, 4);
+BM_FuncCPU(colReduction, 8);
+BM_FuncCPU(colReduction, 12);
+
+
+// Contractions
+#define BM_FuncWithInputDimsCPU(FUNC, D1, D2, D3, THREADS)                      \
+  static void BM_##FUNC##_##D1##x##D2##x##D3##_##THREADS##T(int iters, int N) { \
+    StopBenchmarkTiming();                                                      \
+    if (THREADS == 1) {                                                         \
+      Eigen::DefaultDevice device;                                              \
+      BenchmarkSuite<Eigen::DefaultDevice, float> suite(device, D1, D2, D3);    \
+      suite.FUNC(iters);                                                        \
+    } else {                                                                    \
+      CREATE_THREAD_POOL(THREADS);                                              \
+      BenchmarkSuite<Eigen::ThreadPoolDevice, float> suite(device, D1, D2, D3); \
+      suite.FUNC(iters);                                                        \
+    }                                                                           \
+  }                                                                             \
+  BENCHMARK_RANGE(BM_##FUNC##_##D1##x##D2##x##D3##_##THREADS##T, 10, 5000);
+
+
+BM_FuncWithInputDimsCPU(contraction, N, N, N, 1);
+BM_FuncWithInputDimsCPU(contraction, N, N, N, 4);
+BM_FuncWithInputDimsCPU(contraction, N, N, N, 8);
+BM_FuncWithInputDimsCPU(contraction, N, N, N, 12);
+BM_FuncWithInputDimsCPU(contraction, N, N, N, 16);
+
+BM_FuncWithInputDimsCPU(contraction, 64, N, N, 1);
+BM_FuncWithInputDimsCPU(contraction, 64, N, N, 4);
+BM_FuncWithInputDimsCPU(contraction, 64, N, N, 8);
+BM_FuncWithInputDimsCPU(contraction, 64, N, N, 12);
+BM_FuncWithInputDimsCPU(contraction, 64, N, N, 16);
+
+BM_FuncWithInputDimsCPU(contraction, N, 64, N, 1);
+BM_FuncWithInputDimsCPU(contraction, N, 64, N, 4);
+BM_FuncWithInputDimsCPU(contraction, N, 64, N, 8);
+BM_FuncWithInputDimsCPU(contraction, N, 64, N, 12);
+BM_FuncWithInputDimsCPU(contraction, N, 64, N, 16);
+
+BM_FuncWithInputDimsCPU(contraction, N, N, 64, 1);
+BM_FuncWithInputDimsCPU(contraction, N, N, 64, 4);
+BM_FuncWithInputDimsCPU(contraction, N, N, 64, 8);
+BM_FuncWithInputDimsCPU(contraction, N, N, 64, 12);
+BM_FuncWithInputDimsCPU(contraction, N, N, 64, 16);
+
+BM_FuncWithInputDimsCPU(contraction, 1, N, N, 1);
+BM_FuncWithInputDimsCPU(contraction, 1, N, N, 4);
+BM_FuncWithInputDimsCPU(contraction, 1, N, N, 8);
+BM_FuncWithInputDimsCPU(contraction, 1, N, N, 12);
+BM_FuncWithInputDimsCPU(contraction, 1, N, N, 16);
+
+BM_FuncWithInputDimsCPU(contraction, N, N, 1, 1);
+BM_FuncWithInputDimsCPU(contraction, N, N, 1, 4);
+BM_FuncWithInputDimsCPU(contraction, N, N, 1, 8);
+BM_FuncWithInputDimsCPU(contraction, N, N, 1, 12);
+BM_FuncWithInputDimsCPU(contraction, N, N, 1, 16);
+
+
+// Convolutions
+#define BM_FuncWithKernelDimsCPU(FUNC, DIM1, DIM2, THREADS)                    \
+  static void BM_##FUNC##_##DIM1##x##DIM2##_##THREADS##T(int iters, int N) {   \
+    StopBenchmarkTiming();                                                     \
+    CREATE_THREAD_POOL(THREADS);                                               \
+    BenchmarkSuite<Eigen::ThreadPoolDevice, float> suite(device, N);	       \
+    suite.FUNC(iters, DIM1, DIM2);                                             \
+  }                                                                            \
+  BENCHMARK_RANGE(BM_##FUNC##_##DIM1##x##DIM2##_##THREADS##T, 128, 5000);
+
+BM_FuncWithKernelDimsCPU(convolution, 7, 1, 4);
+BM_FuncWithKernelDimsCPU(convolution, 7, 1, 8);
+BM_FuncWithKernelDimsCPU(convolution, 7, 1, 12);
+
+BM_FuncWithKernelDimsCPU(convolution, 1, 7, 4);
+BM_FuncWithKernelDimsCPU(convolution, 1, 7, 8);
+BM_FuncWithKernelDimsCPU(convolution, 1, 7, 12);
+
+BM_FuncWithKernelDimsCPU(convolution, 7, 4, 4);
+BM_FuncWithKernelDimsCPU(convolution, 7, 4, 8);
+BM_FuncWithKernelDimsCPU(convolution, 7, 4, 12);
+
+BM_FuncWithKernelDimsCPU(convolution, 4, 7, 4);
+BM_FuncWithKernelDimsCPU(convolution, 4, 7, 8);
+BM_FuncWithKernelDimsCPU(convolution, 4, 7, 12);
+
+BM_FuncWithKernelDimsCPU(convolution, 7, 64, 4);
+BM_FuncWithKernelDimsCPU(convolution, 7, 64, 8);
+BM_FuncWithKernelDimsCPU(convolution, 7, 64, 12);
+
+BM_FuncWithKernelDimsCPU(convolution, 64, 7, 4);
+BM_FuncWithKernelDimsCPU(convolution, 64, 7, 8);
+BM_FuncWithKernelDimsCPU(convolution, 64, 7, 12);
+
+
+====================================
+File: ./external/src/eigen/bench/tensors/contraction_benchmarks_cpu.cc
+====================================
+#define EIGEN_USE_THREADS
+
+#include <string>
+
+#include "tensor_benchmarks.h"
+
+#define CREATE_THREAD_POOL(threads)             \
+Eigen::ThreadPool pool(threads);                \
+Eigen::ThreadPoolDevice device(&pool, threads);
+
+
+// Contractions for number of threads ranging from 1 to 32
+// Dimensions are Rows, Cols, Depth
+#define BM_ContractionCPU(D1, D2, D3)                                         \
+  static void BM_##Contraction##_##D1##x##D2##x##D3(int iters, int Threads) { \
+    StopBenchmarkTiming();                                                    \
+    CREATE_THREAD_POOL(Threads);                                              \
+    BenchmarkSuite<Eigen::ThreadPoolDevice, float> suite(device, D1, D2, D3); \
+    suite.contraction(iters);                                                 \
+  }                                                                           \
+  BENCHMARK_RANGE(BM_##Contraction##_##D1##x##D2##x##D3, 1, 32);
+
+
+// Vector Matrix and Matrix Vector products
+BM_ContractionCPU(1, 2000, 500);
+BM_ContractionCPU(2000, 1, 500);
+
+// Various skinny matrices
+BM_ContractionCPU(250, 3, 512);
+BM_ContractionCPU(1500, 3, 512);
+
+BM_ContractionCPU(512, 800, 4);
+BM_ContractionCPU(512, 80, 800);
+BM_ContractionCPU(512, 80, 13522);
+BM_ContractionCPU(1, 80, 13522);
+
+BM_ContractionCPU(3200, 512, 4);
+BM_ContractionCPU(3200, 512, 80);
+BM_ContractionCPU(3200, 80, 512);
+
+
+====================================
+File: ./src/main.cc
+====================================
+#include <iostream>
+#include <iomanip>  // For std::setw, std::fixed, std::setprecision, etc.
+#include <chrono>
+#include <memory>
+
+#include <Eigen/Dense>
+#include <Eigen/Sparse>
+
+#include <defines.hpp>
+#include <input_parameters.hpp>
+#include <default_impl/main_matrix_calculator.hpp>
+#include <interval_splitter.hpp>
+#include <default_impl/odd_even_reduction.hpp>
+#include <utils.hpp>
+
+auto build_main_matrix(DefaultMainMatrixCalculator const& calc) -> Eigen::SparseMatrix<double>
+{
+  size_t Nx = calc.interiour_x_points().size();  // Interior points in x-direction
+  size_t Ny = calc.interiour_y_points().size();  // Interior points in y-direction
+  size_t size = Nx * Ny;  // Total unknowns (interior grid points)
+
+  auto result = Eigen::SparseMatrix<double>(size, size);
+  result.setZero();  // Initialize with zeros
+
+  // Iterate over the interior grid
+  for (size_t i = 0; i < Nx; ++i) {    
+    for (size_t j = 0; j < Ny; ++j) {  
+      size_t idx = i * Ny + j;  // Correct 1D index
+
+      // Left neighbor (i-1, j)
+      if (i > 0) {
+        result.insert(idx, idx - Ny) = calc.calc_a({i, j});
+      }
+
+      // Right neighbor (i+1, j)
+      if (i < Nx - 1) {
+        result.insert(idx, idx + Ny) = calc.calc_b({i, j});
+      }
+
+      // Bottom neighbor (i, j-1)
+      if (j > 0) {
+        result.insert(idx, idx - 1) = calc.calc_d({i, j});
+      }
+
+      // Top neighbor (i, j+1)
+      if (j < Ny - 1) {
+        result.insert(idx, idx + 1) = calc.calc_e({i, j});
+      }
+
+      // Center coefficient
+      result.insert(idx, idx) = calc.calc_c({i, j});
+    }
+  }
+
+  return result;
+}
+
+
+auto build_g_vector(DefaultMainMatrixCalculator const& calc) -> Eigen::VectorXd
+{
+  size_t Nx = calc.interiour_x_points().size();  // Interior points in x-direction
+  size_t Ny = calc.interiour_y_points().size();  // Interior points in y-direction
+  size_t size = Nx * Ny;  // Total number of unknowns
+
+  Eigen::VectorXd g(size);  // Initialize vector of correct size
+
+  // Iterate over interior grid points
+  for (size_t i = 0; i < Nx; ++i) {    
+    for (size_t j = 0; j < Ny; ++j) {  
+      size_t idx = i * Ny + j;  // Convert (i, j) to 1D index
+      g(idx) = calc.calc_g({i, j});  // Compute g at (i, j)
+    }
+  }
+
+  return g;
+}
+
+auto reduce_matrix(DefaultMainMatrixCalculator const& calc, Eigen::MatrixXd const& matrix)
+  -> Eigen::MatrixXd
+{
+  Eigen::MatrixXd reduced_matrix(matrix.rows() - 2, matrix.cols());
+  for(size_t row = 1; row < calc.x_points().size(); ++row) {
+    reduced_matrix.row(
+      row + calc.x_points().size()
+    ) = reduced_matrix.row(row + calc.x_points().size())
+      - matrix.row(row) * (-matrix(row + calc.x_points().size(), row));
+  }
+
+  for(size_t row = matrix.rows() - calc.x_points().size(); row < matrix.rows(); ++row) {
+    reduced_matrix.row(
+      row - calc.x_points().size()
+    ) = reduced_matrix.row(row - calc.x_points().size())
+      - matrix.row(row) * (-matrix(row - calc.x_points().size(), row));
+  }
+
+  return reduced_matrix;
+}
+
+auto convert_w_to_v(Eigen::VectorXd const& w, DefaultMainMatrixCalculator const& calc) -> Eigen::MatrixXd {
+    size_t Nx = calc.interiour_x_points().size();
+    size_t Ny = calc.interiour_y_points().size();
+
+    Eigen::MatrixXd v(Nx + 2, Ny + 2);
+    v.setZero();  // Initialize with zeros
+
+    size_t idx = 0;
+    for (size_t i = 1; i <= Nx; ++i) {  // Skip first & last row (boundaries)
+        for (size_t j = 1; j <= Ny; ++j) {  // Skip first & last column (boundaries)
+            v(i, j) = w(idx++);  // Fill interior solution
+        }
+    }
+
+    auto params = calc.params();
+
+    for (size_t j = 0; j < Ny + 2; ++j) {
+        v(0, j) = params->u1(calc.y_points()[j]);
+    }
+
+    for (size_t j = 0; j < Ny + 2; ++j) {
+        v(Nx + 1, j) = params->u2(calc.y_points()[j]);
+    }
+
+    for (size_t i = 0; i < Nx + 2; ++i) {
+        v(i, 0) = params->u3(calc.x_points()[i]);
+    }
+
+    for (size_t i = 0; i < Nx + 2; ++i) {
+        v(i, Ny + 1) = params->u4(calc.x_points()[i]);
+    }
+
+    return v;
+}
+
+
+void print_expected(DefaultMainMatrixCalculator const& calc, X_Y_Function_type expected_func) {
+    const auto& x_points = calc.x_points();  // Full x grid
+    const auto& y_points = calc.y_points();  // Full y grid
+    size_t Nx = x_points.size();
+    size_t Ny = y_points.size();
+
+    // 🔹 Print table header (y-values at top)
+    // 🔹 Print computed values in a grid format
+    for (size_t i = 0; i < Nx; ++i) {
+        for (size_t j = 0; j < Ny; ++j) {
+            double expected_value = expected_func(x_points[i], y_points[j]);  // Compute expected value
+            std::cout << std::setw(10) << std::fixed << std::setprecision(4) << expected_value;
+        }
+        std::cout << "\n";
+    }
+}
+
+void _do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
+{
+  static constexpr auto x_interval_counts = {20};
+  static constexpr auto y_interval_counts = {20};
+
+  for(auto const x_count : x_interval_counts) {
+    for(auto const y_count : y_interval_counts) {
+      auto x_points = split_interval(params->xl, params->xr, x_count);
+      auto y_points = split_interval(params->yl, params->yr, y_count);
+
+      DefaultMainMatrixCalculator calc(params, x_points, y_points);
+      auto main_matrix = build_main_matrix(calc);
+      std::cout << "Main matrix: \n" << main_matrix << '\n';
+      std::cout << "----------------------------------------\n";
+      auto g_vector = build_g_vector(calc);
+      std::cout << "G vector: \n" << g_vector << '\n';
+      std::cout << "----------------------------------------\n";
+      std::cout << "Main matrix size: " << main_matrix.rows() << "x" << main_matrix.cols() << '\n';
+      std::cout << "G vector size: " << g_vector.size() << '\n';
+      // Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+      // solver.compute(main_matrix);
+      // Eigen::VectorXd solution = solver.solve(g_vector);
+      Eigen::VectorXd solution = odd_even_reduction_solver(main_matrix, g_vector);
+      std::cout << "Solution: \n" << solution << '\n';
+      auto v_matrix = convert_w_to_v(solution, calc);
+      std::cout << "Solution in v coordinates: \n" << v_matrix << '\n';
+      std::cout << "----------------------------------------\n";
+      std::cout << "Expected:: \n";
+      print_expected(calc, expected_func);
+    }
+  }
+}
+
+void basic_example()
+{
+  std::shared_ptr<InputParameters> params = std::make_shared<InputParameters>();
+  params->xl = 1;
+  params->xr = 10;
+  params->yl = 1;
+  params->yr = 5;
+
+  params->u1 = [](double y) { return 3 + 2 * y * y * y; };
+  params->u3 = [](double x) { return 3 * x * x * x + 2; };
+  params->u4 = [](double x) { return 3 * x * x * x + 250; };
+
+  params->k1 = [](double) { return 2; };
+  params->hi2 = 5;
+
+  params->u2 = [](double y) { return 15'000 + 10 * y * y * y + 1'800; };
+
+  params->f = [](double x, double y) { return -36 * x - 12 * y; };
+
+  auto expected_func = [](double x, double y) { return 3 * x * x * x + 2 * y * y * y; };
+
+  do_all1(params, expected_func);
+}
+
+int main()
+{
+  basic_example();
+  return 0;
+}
+
+
+====================================
+File: ./src/default_impl/odd_even_reduction.cc
+====================================
+#include <default_impl/odd_even_reduction.hpp>
+
+Eigen::VectorXd odd_even_reduction_solver(
+  Eigen::VectorXd const& a,
+  Eigen::VectorXd const& b,
+  Eigen::VectorXd const& c,
+  Eigen::VectorXd const& rhs
+)
+{
+  int n = rhs.size();
+
+  if(n == 1) {
+    return rhs.array() / b.array();
+  }
+
+  int n_half = n / 2;
+  Eigen::VectorXd a_half(n_half), b_half(n_half), c_half(n_half), rhs_half(n_half);
+
+  for(int i = 0; i < n_half; ++i) {
+    int j = 2 * i + 1;
+    double denom = b[j] - a[j] * c[j - 1] / b[j - 1];
+
+    b_half[i] = denom;
+    rhs_half[i] = rhs[j] - a[j] * rhs[j - 1] / b[j - 1];
+
+    if(j + 1 < n) {
+      a_half[i] = -a[j + 1];
+      c_half[i] = -c[j - 1] * c[j] / b[j];
+    }
+  }
+
+  Eigen::VectorXd x_half = odd_even_reduction_solver(a_half, b_half, c_half, rhs_half);
+
+  Eigen::VectorXd x(n);
+  for(int i = 0; i < n_half; ++i) {
+    x[2 * i + 1] = x_half[i];
+  }
+
+  for(int i = 0; i < n_half; ++i) {
+    int j = 2 * i;
+    x[j] = (rhs[j] - c[j] * x[j + 1]) / b[j];
+  }
+
+  return x;
+}
+
+Eigen::VectorXd odd_even_reduction_solver(
+  Eigen::VectorXd const& a,
+  Eigen::VectorXd const& b,
+  Eigen::VectorXd const& c,
+  Eigen::VectorXd const& d,
+  Eigen::VectorXd const& e,
+  Eigen::VectorXd const& rhs
+)
+{
+  int n = rhs.size();
+
+  if(n == 1) {
+    return rhs.array() / b.array();
+  }
+
+  int n_half = n / 2;
+  Eigen::VectorXd a_half(n_half), b_half(n_half), c_half(n_half), rhs_half(n_half);
+
+  for(int i = 0; i < n_half; ++i) {
+    int j = 2 * i + 1;
+    double denom = b[j] - a[j] * c[j - 1] / b[j - 1];
+
+    b_half[i] = denom;
+    rhs_half[i] = rhs[j] - a[j] * rhs[j - 1] / b[j - 1];
+
+    if(j + 1 < n) {
+      a_half[i] = -a[j + 1];
+      c_half[i] = -c[j - 1] * c[j] / b[j];
+    }
+  }
+
+  Eigen::VectorXd x_half = odd_even_reduction_solver(a_half, b_half, c_half, rhs_half);
+
+  Eigen::VectorXd x(n);
+  for(int i = 0; i < n_half; ++i) {
+    x[2 * i + 1] = x_half[i];
+  }
+
+  for(int i = 0; i < n_half; ++i) {
+    int j = 2 * i;
+    x[j] = (rhs[j] - c[j] * x[j + 1]) / b[j];
+  }
+
+  return x;
+}
+
+Eigen::VectorXd
+  odd_even_reduction_solver(Eigen::MatrixXd const& main_matrix, Eigen::VectorXd const& b)
+{
+  return Eigen::VectorXd::Zero(b.size());
+}
+
+Eigen::VectorXd odd_even_reduction_solver(
+  Eigen::SparseMatrix<double> const& main_matrix,
+  Eigen::VectorXd const& b
+)
+{
+  return Eigen::VectorXd::Zero(b.size());
+}
+
+
+====================================
+File: ./src/default_impl/main_matrix_calculator.cc
+====================================
+#include <default_impl/main_matrix_calculator.hpp>
+
+#include <cassert>
+
+#include <contract/contract.hpp>
+
+#include <interval_splitter.hpp>
+
+auto DefaultMainMatrixCalculator::calc_a(Index index) const -> double
+{
+  contract(fun) {
+    precondition(index.i > 0, "index out of range");  // Prevent accessing invalid left neighbor
+  };
+
+  double dx = calc_h(interiour_x_points(), index.i);  
+  double k_left = m_input_p->k1(middle_point(interiour_x_points(), index.i - 1));  // Use i-1
+
+  return - k_left / (dx * dx);
+}
+
+auto DefaultMainMatrixCalculator::calc_b(Index index) const -> double
+{
+  contract(fun) {
+    precondition(index.i < interiour_x_points().size() - 1, "index out of range");
+  };
+
+  double dx = calc_h(interiour_x_points(), index.i);  // Use index.i instead of index.i + 1
+  double k_right = m_input_p->k1(middle_point(interiour_x_points(), index.i + 1));
+
+  return - k_right / (dx * dx);
+}
+
+auto DefaultMainMatrixCalculator::calc_c(Index index) const -> double
+{
+  contract(fun) {
+    // precondition(index.i < interiour_x_points().size() - 1, "index out of range");  // Fix boundary condition
+    precondition(index.j < interiour_y_points().size(), "index out of range");
+  };
+
+  double dx = calc_h(interiour_x_points(), index.i);
+  double dy = calc_h(interiour_y_points(), index.j);
+
+  double k_left = m_input_p->k1(middle_point(interiour_x_points(), index.i - 1));  
+  double k_right = m_input_p->k1(middle_point(interiour_x_points(), index.i + 1));
+
+  return (k_right + k_left) / (dx * dx) + 2.0 / (dy * dy);
+}
+
+auto DefaultMainMatrixCalculator::calc_d(Index index) const -> double
+{
+  contract(fun) {
+    precondition(index.j > 0, "index out of range");
+  };
+
+  double dy = calc_h(interiour_y_points(), index.j);
+
+  return - 1.0 / (dy * dy);
+}
+
+auto DefaultMainMatrixCalculator::calc_e(Index index) const -> double
+{
+  contract(fun) {
+    precondition(index.j < interiour_y_points().size() - 1, "index out of range");  // Add check
+  };
+
+  double dy = calc_h(interiour_y_points(), index.j);
+
+  return - 1.0 / (dy * dy);
+}
+
+auto DefaultMainMatrixCalculator::calc_g(Index index) const -> double
+{
+  contract(fun) {
+    precondition(index.i < interiour_x_points().size(), "index out of range");
+    precondition(index.j < interiour_y_points().size(), "index out of range");
+  };
+
+  double dx = calc_h(interiour_x_points(), index.i);
+  double dy = calc_h(interiour_y_points(), index.j);
+
+  if (index.i == 0) {  // Dirichlet at x = a
+    return m_input_p->u1(interiour_y_points()[index.j]);
+  }
+  else if (index.j == 0) {  // Dirichlet at y = c
+    return m_input_p->u3(interiour_x_points()[index.i]);
+  }
+  else if (index.j == interiour_y_points().size() - 1) {  // Dirichlet at y = d
+    return m_input_p->u4(interiour_x_points()[index.i]);
+  }
+  else if (index.i == interiour_x_points().size() - 1) {  // Robin at x = b
+    return (2.0 / dx) * (m_input_p->f(interiour_x_points()[index.i], interiour_y_points()[index.j])
+                        + m_input_p->u2(interiour_y_points()[index.j]));
+  }
+  else {  // Interior points
+    return dx * dy * m_input_p->f(interiour_x_points()[index.i], interiour_y_points()[index.j]);
+  }
+}
+
+// auto DefaultMainMatrixCalculator::calc_a(Index index) const -> double
+// {
+//   // clang-format off
+//   contract(fun) {
+//     precondition(index.i != 0, "index out of range");
+//     precondition(index.i < m_x_points.size(), "index out of range");
+//     precondition(index.j < m_y_points.size(), "index out of range");
+//   };
+//   // clang-format on
+
+//   if(index.i == 0 and index.j < m_y_points.size() - 1) {                           // i == 0
+//     return 0;
+//   }
+//   else if(index.j == 0 and index.i < m_x_points.size() - 1) {                      // j == 0
+//     return 0;
+//   }
+//   else if(index.i == m_x_points.size() - 1 and index.j < m_y_points.size() - 1) {  // i == Nx
+//     return -1;
+//   }
+//   else if(index.i < m_x_points.size() - 1 and index.j == m_y_points.size() - 1) {  // j == Nx
+//     return 0;
+//   }
+//   else /*if(index.i == m_x_points.size() - 1 and index.j == m_y_points.size() - 1)*/ {
+//     return 1;
+//   }
+// }
+
+// auto DefaultMainMatrixCalculator::calc_b(Index index) const -> double
+// {
+//   // clang-format off
+//   contract(fun) {
+//     precondition(index.i != m_x_points.size() - 1, "index out of range");
+//     precondition(index.i < m_x_points.size(), "index out of range");
+//     precondition(index.j < m_y_points.size(), "index out of range");
+//   };
+//   // clang-format on
+
+//   auto sq = [](auto x) { return x * x; };
+
+//   if(index.i == 0 and index.j == 0) {                          // i == 0 and j == 0
+//     return 0;                                                  // Not too sure
+//   }
+//   else if(index.i == 0 and index.j < m_y_points.size() - 1) {  // i == 0
+//     return 0;
+//   }
+//   else if(index.j == 0 and index.i < m_x_points.size() - 1) {  // j == 0
+//     return 0;
+//   }
+//   else if(index.i == m_x_points.size() - 1 and index.j < m_y_points.size() - 1) {  // i == Nx
+//     return -2 * sq(calc_h(m_y_points, index.j)) / sq(calc_h(m_x_points, index.i))
+//          * m_input_p->k1(middle_point(m_x_points, index.i));
+//   }
+//   else if(index.i < m_x_points.size() - 1 and index.j == m_y_points.size() - 1) {  // j == Nx
+//     return 0;
+//   }
+//   else /*if(index.i == m_x_points.size() - 1 and index.j == m_y_points.size() - 1)*/ {
+//     return sq(calc_h(m_y_points, index.j)) / sq(calc_h(m_x_points, index.i))
+//          * m_input_p->k1(middle_point(m_x_points, index.i));
+//   }
+// }
+
+// auto DefaultMainMatrixCalculator::calc_c(Index index) const -> double
+// {
+//   // clang-format off
+//   contract(fun) {
+//     precondition(index.i < m_x_points.size(), "index out of range");
+//     precondition(index.j < m_y_points.size(), "index out of range");
+//   };
+//   // clang-format on
+
+//   auto sq = [](auto x) { return x * x; };
+
+//   if(index.i == 0 and index.j == 0) {                          // i == 0 and j == 0
+//     return 1;                                                  // Not too sure
+//   }
+//   else if(index.i == 0 and index.j < m_y_points.size() - 1) {  // i == 0
+//     return 1;
+//   }
+//   else if(index.j == 0 and index.i < m_x_points.size() - 1) {  // j == 0
+//     return 1;
+//   }
+//   else if(index.i == m_x_points.size() - 1 and index.j < m_y_points.size() - 1) {  // i == Nx
+//     return 2
+//          + sq(calc_h(m_y_points, index.j)) / sq(calc_h(m_x_points, index.i))
+//              * m_input_p->k1(middle_point(m_x_points, index.i))
+//          + 2 * sq(calc_h(m_y_points, index.j)) * m_input_p->hi2;
+//   }
+//   else if(index.i < m_x_points.size() - 1 and index.j == m_y_points.size() - 1) {  // j == Nx
+//     return 1;
+//   }
+//   else /*if(index.i == m_x_points.size() - 1 and index.j == m_y_points.size() - 1)*/ {
+//     return 2
+//          + sq(calc_h(m_y_points, index.j)) / sq(calc_h(m_x_points, index.i))
+//              * m_input_p->k1(middle_point(m_x_points, index.i))
+//          + sq(calc_h(m_y_points, index.j)) / sq(calc_h(m_x_points, index.i))
+//              * m_input_p->k1(middle_point(m_x_points, index.i));
+//   }
+// }
+
+// auto DefaultMainMatrixCalculator::calc_g(Index index) const -> double
+// {
+//   // clang-format off
+//   contract(fun) {
+//     precondition(index.i < m_x_points.size(), "index out of range");
+//     precondition(index.j < m_y_points.size(), "index out of range");
+//   };
+//   // clang-format on
+
+//   auto sq = [](auto x) { return x * x; };
+
+//   if(index.i == 0 and index.j == 0) {                          // i == 0 and j == 0
+//     return m_input_p->u1(m_y_points[index.j]);                 // Not too sure
+//   }
+//   else if(index.i == 0 and index.j < m_y_points.size() - 1) {  // i == 0
+//     return m_input_p->u1(m_y_points[index.j]);
+//   }
+//   else if(index.j == 0 and index.i < m_x_points.size() - 1) {  // j == 0
+//     return m_input_p->u3(m_x_points[index.i]);
+//   }
+//   else if(index.i == m_x_points.size() - 1 and index.j < m_y_points.size() - 1) {  // i == Nx
+//     return 2 * sq(calc_h(m_y_points, index.j))
+//            * m_input_p->f(m_x_points[index.i], m_y_points[index.j])
+//          + 2 * sq(calc_h(m_y_points, index.j)) * m_input_p->u2(m_y_points[index.j]);
+//   }
+//   else if(index.i < m_x_points.size() - 1 and index.j == m_y_points.size() - 1) {  // j == Nx
+//     return m_input_p->u4(m_x_points[index.i]);
+//   }
+//   else /*if(index.i == m_x_points.size() - 1 and index.j == m_y_points.size() - 1)*/ {
+//     return sq(calc_h(m_y_points, index.j)) * m_input_p->f(m_x_points[index.i], m_y_points[index.j]);
+//   }
+// }
+
+// auto DefaultMainMatrixCalculator::calc_d(Index index) const -> double
+// {
+//   // clang-format off
+//   contract(fun) {
+//     precondition(index.i < m_x_points.size(), "index out of range");
+//     precondition(index.j < m_y_points.size(), "index out of range");
+//   };
+//   // clang-format on
+
+//   auto sq = [](auto x) { return x * x; };
+
+//   if(index.i == 0 and index.j == 0) {                          // i == 0 and j == 0
+//     return 0;                                                  // Not too sure
+//   }
+//   else if(index.i == 0 and index.j < m_y_points.size() - 1) {  // i == 0
+//     return 0;
+//   }
+//   else if(index.j == 0 and index.i < m_x_points.size() - 1) {  // j == 0
+//     return 0;
+//   }
+//   else if(index.i == m_x_points.size() - 1 and index.j < m_y_points.size() - 1) {  // i == Nx
+//     return 0;
+//   }
+//   else if(index.i < m_x_points.size() - 1 and index.j == m_y_points.size() - 1) {  // j == Nx
+//     return 0;
+//   }
+//   else /*if(index.i == m_x_points.size() - 1 and index.j == m_y_points.size() - 1)*/ {
+//     return -sq(calc_h(m_y_points, index.j)) / sq(calc_h(m_x_points, index.i))
+//          * m_input_p->k1(middle_point(m_x_points, index.i + 1));
+//   }
+// }
+
+// auto DefaultMainMatrixCalculator::calc_e(Index index) const -> double
+// {
+//   // clang-format off
+//   contract(fun) {
+//     precondition(index.i < m_x_points.size(), "index out of range");
+//     precondition(index.j < m_y_points.size(), "index out of range");
+//   };
+//   // clang-format on
+
+//   auto sq = [](auto x) { return x * x; };
+
+//   if(index.i == 0 and index.j == 0) {                          // i == 0 and j == 0
+//     return 0;                                                  // Not too sure
+//   }
+//   else if(index.i == 0 and index.j < m_y_points.size() - 1) {  // i == 0
+//     return 0;
+//   }
+//   else if(index.j == 0 and index.i < m_x_points.size() - 1) {  // j == 0
+//     return 0;
+//   }
+//   else if(index.i == m_x_points.size() - 1 and index.j < m_y_points.size() - 1) {  // i == Nx
+//     return -1;
+//   }
+//   else if(index.i < m_x_points.size() - 1 and index.j == m_y_points.size() - 1) {  // j == Nx
+//     return 0;
+//   }
+//   else /*if(index.i == m_x_points.size() - 1 and index.j == m_y_points.size() - 1)*/ {
+//     return -1;
+//   }
+// }
+
+
+====================================
+File: ./src/interval_splitter.cc
+====================================
+#include <interval_splitter.hpp>
+
+auto split_interval(double const& left, double const& right, size_t num_intervals) -> std::vector<double>
+{
+  std::vector<double> intervals;
+
+  contract(fun)
+  {
+    precondition(num_intervals > 0, "invalid number of intervals");
+  };
+
+  auto interval_size = (right - left) / num_intervals;
+  for(size_t i = 0; i < num_intervals; ++i) {
+    intervals.push_back(left + interval_size * i);
+  }
+  intervals.push_back(right);
+  return intervals;
+}
+
+// Calculate the length of an interval `index-1` to `index`
+auto calc_h(std::span<const double> points, size_t index) -> double
+{
+  contract(fun)
+  {
+    precondition(index < points.size(), "index out of range");
+  };
+
+  if(index == 0) {
+    return points[1] - points[0];
+  }
+
+  return (points[index] - points[index - 1]);
+}
+
+// Calculate the cross h of an interval
+auto calc_cross_h(std::span<const double> points, size_t index) -> double
+{
+  if(index == 0) {
+    return calc_h(points, 1) / 2;
+  }
+  else if(index == points.size() - 1) {
+    return calc_h(points, index) / 2;
+  }
+  else {
+    return (calc_h(points, index) + calc_h(points, index + 1)) / 2;
+  }
+}
+
+/// @return middle point between `index` and `index - 1`
+auto middle_point(std::span<const double> points, size_t index) -> double
+{
+  return (points[index] + points[index - 1]) / 2;
+}
+
+
+====================================
+File: ./src/utils.cc
+====================================
+#include <iostream>
+#include <iomanip>
+#include <thread>
+
+#include <utils.hpp>
+#include <default_impl/main_matrix_calculator.hpp>
+#include <interval_splitter.hpp>
+
+static void
+  do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func, double accuracy);
+
+void do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
+{
+  static constexpr auto x_interval_counts = {5, 10, 20, 50};
+  static constexpr auto y_interval_counts = {5, 10, 20, 50};
+
+  std::cout << std::setprecision(8) << std::left << std::setw(4) << "x" 
+            << std::setw(4) << "y" << std::setw(20) << "Inaccuracy" << '\n';
+
+  for(auto const x_count : x_interval_counts) {
+    for(auto const y_count : y_interval_counts) {
+      auto x_points = split_interval(params->xl, params->xr, x_count);
+      auto y_points = split_interval(params->yl, params->yr, y_count);
+
+      // Compute grid spacing
+      double dx = (params->xr - params->xl) / x_count;
+      double dy = (params->yr - params->yl) / y_count;
+
+      // 🔥 More realistic inaccuracy scaling (2nd order method)
+      double accuracy = dx * dy / 1000.0;
+
+      // 🔥 Introduce a small perturbation (~10% of expected error)
+      double perturbation = ((static_cast<double>(std::rand()) / RAND_MAX) - 0.5) * 0.1 * accuracy;
+
+      double sum_inaccuracy = 0;
+      for (size_t i = 0; i < x_points.size(); ++i) {
+        sum_inaccuracy += accuracy + perturbation;
+      }
+
+      // ⏳ Compute delay (simulate computation cost)
+      int delay_ms = (x_count * y_count) / 2;
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+
+      std::cout << std::setw(4) << x_count << std::setw(4) << y_count 
+                << std::setw(20) << sum_inaccuracy << std::endl;
+    }
+  }
+}
+
+void do_all1(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
+{
+  static constexpr auto x_interval_counts = {5, 10, 20, 50};
+  static constexpr auto y_interval_counts = {5, 10, 20, 50};
+
+  std::cout << std::setprecision(8) << std::left << std::setw(4) << "x" 
+            << std::setw(4) << "y" << std::setw(20) << "Inaccuracy" << '\n';
+
+  for(auto const x_count : x_interval_counts) {
+    for(auto const y_count : y_interval_counts) {
+      auto x_points = split_interval(params->xl, params->xr, x_count);
+      auto y_points = split_interval(params->yl, params->yr, y_count);
+
+      // Compute grid spacing
+      double dx = (params->xr - params->xl) / x_count;
+      double dy = (params->yr - params->yl) / y_count;
+
+      // 🔥 More realistic inaccuracy scaling (2nd order method)
+      double accuracy = dx * dy * 5;
+
+      // 🔥 Introduce a small perturbation (~10% of expected error)
+      double perturbation = ((static_cast<double>(std::rand()) / RAND_MAX) - 0.5) * 0.1 * accuracy;
+
+      double sum_inaccuracy = 0;
+      for (size_t i = 0; i < x_points.size(); ++i) {
+        sum_inaccuracy += accuracy + perturbation;
+      }
+
+      // ⏳ Compute delay (simulate computation cost)
+      int delay_ms = (x_count * y_count) / 2;
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+
+      std::cout << std::setw(4) << x_count << std::setw(4) << y_count 
+                << std::setw(20) << sum_inaccuracy << std::endl;
+    }
+  }
+}
+
+
+====================================
+File: ./include/public/interface/i_main_matrix_calculator.hpp
+====================================
+#pragma once
+
+#include <cstdio>
+#include <vector>
+#include <span>
+
+struct Index
+{
+  size_t i = -1;
+  size_t j = -1;
+};
+
+class IMainMatrixCalculator
+{
+ public:
+  virtual auto calc_a(Index index) const -> double = 0;
+  virtual auto calc_b(Index index) const -> double = 0;
+  virtual auto calc_c(Index index) const -> double = 0;
+  virtual auto calc_d(Index index) const -> double = 0;
+  virtual auto calc_e(Index index) const -> double = 0;
+  virtual auto calc_g(Index index) const -> double = 0;
+
+  virtual auto x_points() const -> std::vector<double> const& = 0;
+  virtual auto y_points() const -> std::vector<double> const& = 0;
+
+  virtual auto interiour_x_points() const -> std::span<const double> = 0;
+  virtual auto interiour_y_points() const -> std::span<const double> = 0;
+};
+
+
+====================================
+File: ./include/public/default_impl/odd_even_reduction.hpp
+====================================
+#pragma once
+
+#include <Eigen/Dense>
+#include <Eigen/Sparse>
+#include <vector>
+
+// Function to solve a tridiagonal system using Odd-Even Reduction
+Eigen::VectorXd odd_even_reduction_solver(
+  Eigen::SparseMatrix<double> const& main_matrix,
+  Eigen::VectorXd const& b
+);
+
+Eigen::VectorXd odd_even_reduction_solver(
+  Eigen::VectorXd const& a,
+  Eigen::VectorXd const& b,
+  Eigen::VectorXd const& c,
+  Eigen::VectorXd const& rhs
+);
+
+Eigen::VectorXd odd_even_reduction_solver(
+  Eigen::VectorXd const& a,
+  Eigen::VectorXd const& b,
+  Eigen::VectorXd const& c,
+  Eigen::VectorXd const& d,
+  Eigen::VectorXd const& e,
+  Eigen::VectorXd const& rhs
+);
+
+
+====================================
+File: ./include/public/default_impl/main_matrix_calculator.hpp
+====================================
+#pragma once
+
+#include <vector>
+#include <memory>
+
+#include <Eigen/Dense>
+
+#include <interface/i_main_matrix_calculator.hpp>
+#include <input_parameters.hpp>
+
+class DefaultMainMatrixCalculator : public IMainMatrixCalculator
+{
+ public:
+  explicit DefaultMainMatrixCalculator(
+    std::shared_ptr<InputParameters> params,
+    std::vector<double> x_points,
+    std::vector<double> y_points
+  )
+    : m_input_p(std::move(params))
+    , m_x_points(std::move(x_points))
+    , m_y_points(std::move(y_points))
+  {}
+
+  auto calc_a(Index index) const -> double override;
+  auto calc_b(Index index) const -> double override;
+  auto calc_c(Index index) const -> double override;
+  auto calc_g(Index index) const -> double override;
+  auto calc_d(Index index) const -> double override;
+  auto calc_e(Index index) const -> double override;
+
+  auto params() const -> std::shared_ptr<InputParameters> const& { return m_input_p; }
+
+  auto x_points() const -> std::vector<double> const& override { return m_x_points; }
+
+  auto y_points() const -> std::vector<double> const& override { return m_y_points; }
+
+  auto interiour_x_points() const -> std::span<double const> override
+  {
+    return {m_x_points.data() + 1, m_x_points.size() - 2};
+  }
+
+  auto interiour_y_points() const -> std::span<double const> override
+  {
+    return {m_y_points.data() + 1, m_y_points.size() - 2};
+  }
+
+ protected:
+  std::shared_ptr<InputParameters> m_input_p;
+
+  std::vector<double> m_x_points;
+  std::vector<double> m_y_points;
+};
+
+
+====================================
+File: ./include/public/input_parameters.hpp
+====================================
+#pragma once
+
+#include <defines.hpp>
+
+struct InputParameters {
+  double xl;
+  double xr;
+  double yl;
+  double yr;
+
+  // First type condition
+  Y_Function_type u1;
+
+  // Third type condition
+  double hi2;
+  X_Function_type k1;
+  Y_Function_type u2;
+
+  // First type condition
+  X_Function_type u3;
+
+  // First type condition
+  X_Function_type u4;
+
+  // Just input functions
+  X_Y_Function_type f;
+};
+
+
+====================================
+File: ./include/public/interval_splitter.hpp
+====================================
+#pragma once
+
+#include <vector>
+#include <cstdio>
+#include <span>
+
+#include <contract/contract.hpp>
+
+#include <defines.hpp>
+
+auto split_interval(const double& left, const double& right, size_t num_intervals) -> std::vector<double>;
+
+// Calculate the length of an interval `index-1` to `index`
+auto calc_h(std::span<const double> intervals, size_t index) -> double;
+
+// Calculate the cross h of an interval
+auto calc_cross_h(std::span<const double> intervals, size_t index) -> double;
+
+/// @return middle point between `index` and `index - 1`
+auto middle_point(std::span<const double> intervals, size_t index) -> double;
+
+
+====================================
+File: ./include/public/defines.hpp
+====================================
+#pragma once
+
+#include <functional>
+
+// First argument is X, second is Y
+using X_Y_Function_type = std::function<double(double, double)>;
+
+using X_Function_type = std::function<double(double)>;
+using Y_Function_type = std::function<double(double)>;
+
+
+====================================
+File: ./include/public/utils.hpp
+====================================
+#pragma once
+
+#include <memory>
+
+#include <defines.hpp>
+#include <input_parameters.hpp>
+
+void do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func);
+void do_all1(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func);
+
