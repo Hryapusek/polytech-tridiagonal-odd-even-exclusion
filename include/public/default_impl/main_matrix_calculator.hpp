@@ -16,9 +16,9 @@ class DefaultMainMatrixCalculator : public IMainMatrixCalculator
     std::vector<double> x_points,
     std::vector<double> y_points
   )
-    : m_input_p(std::move(params)),
-      m_x_points(std::move(x_points)),
-      m_y_points(std::move(y_points))
+    : m_input_p(std::move(params))
+    , m_x_points(std::move(x_points))
+    , m_y_points(std::move(y_points))
   {}
 
   auto calc_a(Index index) const -> double override;
@@ -31,7 +31,18 @@ class DefaultMainMatrixCalculator : public IMainMatrixCalculator
   auto params() const -> std::shared_ptr<InputParameters> const& { return m_input_p; }
 
   auto x_points() const -> std::vector<double> const& override { return m_x_points; }
+
   auto y_points() const -> std::vector<double> const& override { return m_y_points; }
+
+  auto interiour_x_points() const -> std::span<double const> override
+  {
+    return {m_x_points.data() + 1, m_x_points.size() - 2};
+  }
+
+  auto interiour_y_points() const -> std::span<double const> override
+  {
+    return {m_y_points.data() + 1, m_y_points.size() - 2};
+  }
 
  protected:
   std::shared_ptr<InputParameters> m_input_p;

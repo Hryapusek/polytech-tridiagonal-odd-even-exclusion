@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <vector>
+#include <span>
 
 struct Index
 {
@@ -21,4 +22,7 @@ class IMainMatrixCalculator
 
   virtual auto x_points() const -> std::vector<double> const& = 0;
   virtual auto y_points() const -> std::vector<double> const& = 0;
+
+  virtual auto interiour_x_points() const -> std::span<const double> = 0;
+  virtual auto interiour_y_points() const -> std::span<const double> = 0;
 };
