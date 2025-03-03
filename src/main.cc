@@ -203,7 +203,7 @@ void basic_example()
 
   auto expected_func = [](double x, double y) { return 3 * x * x * x + 2 * y * y * y; };
 
-  do_all1(params, expected_func);
+  do_all(params, expected_func);
 }
 
 int main()
