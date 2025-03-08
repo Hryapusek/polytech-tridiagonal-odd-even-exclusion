@@ -13,6 +13,15 @@
 #include <default_impl/odd_even_reduction.hpp>
 #include <utils.hpp>
 
+void print_matrix(const Eigen::MatrixXd& matrix, int width = 10, int precision = 2) {
+    for (int i = 0; i < matrix.rows(); ++i) {
+        for (int j = 0; j < matrix.cols(); ++j) {
+            std::cout << std::setw(width) << std::fixed << std::setprecision(precision) << matrix(i, j);
+        }
+        std::cout << "\n";
+    }
+}
+
 auto build_main_matrix(DefaultMainMatrixCalculator const& calc) -> Eigen::SparseMatrix<double>
 {
   size_t Nx = calc.interiour_x_points().size();  // Interior points in x-direction
@@ -29,22 +38,22 @@ auto build_main_matrix(DefaultMainMatrixCalculator const& calc) -> Eigen::Sparse
 
       // Left neighbor (i-1, j)
       if (i > 0) {
-        result.insert(idx, idx - Ny) = calc.calc_a({i, j});
+        result.insert(idx, idx - Ny) = calc.calc_d({i, j});
       }
 
       // Right neighbor (i+1, j)
       if (i < Nx - 1) {
-        result.insert(idx, idx + Ny) = calc.calc_b({i, j});
+        result.insert(idx, idx + Ny) = calc.calc_e({i, j});
       }
 
       // Bottom neighbor (i, j-1)
       if (j > 0) {
-        result.insert(idx, idx - 1) = calc.calc_d({i, j});
+        result.insert(idx, idx - 1) = calc.calc_a({i, j});
       }
 
       // Top neighbor (i, j+1)
       if (j < Ny - 1) {
-        result.insert(idx, idx + 1) = calc.calc_e({i, j});
+        result.insert(idx, idx + 1) = calc.calc_b({i, j});
       }
 
       // Center coefficient
@@ -151,8 +160,8 @@ void print_expected(DefaultMainMatrixCalculator const& calc, X_Y_Function_type e
 
 void _do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
 {
-  static constexpr auto x_interval_counts = {20};
-  static constexpr auto y_interval_counts = {20};
+  static constexpr auto x_interval_counts = {4};
+  static constexpr auto y_interval_counts = {4};
 
   for(auto const x_count : x_interval_counts) {
     for(auto const y_count : y_interval_counts) {
@@ -161,17 +170,18 @@ void _do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected
 
       DefaultMainMatrixCalculator calc(params, x_points, y_points);
       auto main_matrix = build_main_matrix(calc);
-      std::cout << "Main matrix: \n" << main_matrix << '\n';
+      std::cout << "Main matrix: \n";
+      print_matrix(main_matrix);
       std::cout << "----------------------------------------\n";
       auto g_vector = build_g_vector(calc);
       std::cout << "G vector: \n" << g_vector << '\n';
       std::cout << "----------------------------------------\n";
       std::cout << "Main matrix size: " << main_matrix.rows() << "x" << main_matrix.cols() << '\n';
       std::cout << "G vector size: " << g_vector.size() << '\n';
-      // Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
-      // solver.compute(main_matrix);
-      // Eigen::VectorXd solution = solver.solve(g_vector);
-      Eigen::VectorXd solution = odd_even_reduction_solver(main_matrix, g_vector);
+      Eigen::SparseLU<Eigen::SparseMatrix<double>> solver;
+      solver.compute(main_matrix);
+      Eigen::VectorXd solution = solver.solve(g_vector);
+      // Eigen::VectorXd solution = odd_even_reduction_solver(main_matrix, g_vector);
       std::cout << "Solution: \n" << solution << '\n';
       auto v_matrix = convert_w_to_v(solution, calc);
       std::cout << "Solution in v coordinates: \n" << v_matrix << '\n';
@@ -180,6 +190,30 @@ void _do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected
       print_expected(calc, expected_func);
     }
   }
+}
+
+void first_example()
+{
+  std::shared_ptr<InputParameters> params = std::make_shared<InputParameters>();
+  params->xl = 1;
+  params->xr = 2;
+  params->yl = 1;
+  params->yr = 2;
+
+  params->u1 = [](double y) { return 3; };
+  params->u3 = [](double x) { return 3; };
+  params->u4 = [](double x) { return 3; };
+
+  params->k1 = [](double) { return 2; };
+  params->hi2 = 5;
+
+  params->u2 = [](double y) { return 15; };
+
+  params->f = [](double x, double y) { return 0; };
+
+  auto expected_func = [](double x, double y) { return 3; };
+
+  do_all5(params, expected_func);
 }
 
 void basic_example()
@@ -208,6 +242,6 @@ void basic_example()
 
 int main()
 {
-  basic_example();
+  first_example();
   return 0;
 }

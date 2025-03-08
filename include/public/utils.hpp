@@ -8,3 +8,6 @@
 void do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func);
 void do_all1(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func);
 void do_all2(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func);
+void do_all3(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func);
+void do_all4(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func);
+void do_all5(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func);

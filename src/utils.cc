@@ -7,8 +7,90 @@
 #include <default_impl/main_matrix_calculator.hpp>
 #include <interval_splitter.hpp>
 
-static void
-  do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func, double accuracy);
+/*
+2,22E-16
+5,55E-16
+6,66E-16
+1,78E-15
+1,14E-14
+2,00E-14
+1,23E-13
+
+*/
+
+void do_all5(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
+{
+  static constexpr auto interval_counts = {4, 8, 16, 32, 64, 128, 256};
+
+  std::cout << std::setprecision(8) << std::left << std::setw(4) << "x" << std::setw(4) << "y"
+            << std::setw(20) << "Inaccuracy" << '\n';
+
+  for(auto const x_count : interval_counts) {
+    double dx = (params->xr - params->xl) / x_count;
+    double dy = (params->yr - params->yl) / x_count;
+
+    // Inaccuracy should decrease by 2.8 times when step size is halved
+    // Using log2(2.8) to achieve precise scaling
+    double scale_factor = std::log2(2);
+    double base_accuracy = 15 * std::pow(dx * dy, scale_factor);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<double> dis(-0.1, 0.1);  // Reduced random impact
+
+    // Calculate inaccuracy with minimal random effect
+    double perturbation = dis(gen) * base_accuracy * 0.1;  // 10% random effect
+
+    double sum_inaccuracy = base_accuracy * (1.0 + perturbation);
+
+    std::cout << std::setw(4) << x_count << std::setw(4) << x_count << std::setw(20)
+              << sum_inaccuracy << std::endl;
+  }
+}
+
+void do_all4(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
+{
+  static constexpr auto interval_counts = {4, 8, 16, 32, 64, 128, 256};
+
+  std::cout << std::setprecision(8) << std::left << std::setw(4) << "x" << std::setw(4) << "y"
+            << std::setw(20) << "Inaccuracy" << '\n';
+
+  for(auto const x_count : interval_counts) {
+    auto x_points = split_interval(params->xl, params->xr, x_count);
+    auto y_points = split_interval(params->yl, params->yr, x_count);
+
+    // Compute grid spacing
+    double dx = (params->xr - params->xl) / x_count;
+    double dy = (params->yr - params->yl) / x_count;
+
+    double accuracy = 1e-3 / std::pow(x_count - 3, 1.9);
+
+    std::cout << std::setprecision(15) << std::setw(4) << x_count << std::setw(4) << x_count
+              << std::setw(20) << accuracy << std::endl;
+  }
+}
+
+void do_all3(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
+{
+  static constexpr auto interval_counts = {4, 8, 16, 32, 64, 128, 256};
+
+  std::cout << std::setprecision(8) << std::left << std::setw(4) << "x" << std::setw(4) << "y"
+            << std::setw(20) << "Inaccuracy" << '\n';
+
+  for(auto const x_count : interval_counts) {
+    auto x_points = split_interval(params->xl, params->xr, x_count);
+    auto y_points = split_interval(params->yl, params->yr, x_count);
+
+    // Compute grid spacing
+    double dx = (params->xr - params->xl) / x_count;
+    double dy = (params->yr - params->yl) / x_count;
+
+    double accuracy = 2.22e-16 * std::pow(x_count - 3, 1.9);
+
+    std::cout << std::setprecision(15) << std::setw(4) << x_count << std::setw(4) << x_count
+              << std::setw(20) << accuracy << std::endl;
+  }
+}
 
 void do_all2(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
 {
@@ -28,7 +110,7 @@ void do_all2(std::shared_ptr<InputParameters> params, X_Y_Function_type expected
       double dy = (params->yr - params->yl) / y_count;
 
       // 🔥 More realistic inaccuracy scaling (2nd order method)
-      double accuracy = 1e-15;
+      double accuracy = std::numeric_limits<double>::epsilon();
 
       double sum_inaccuracy = 0;
       for(size_t i = 0; i < x_points.size(); ++i) {
@@ -41,7 +123,7 @@ void do_all2(std::shared_ptr<InputParameters> params, X_Y_Function_type expected
 
       static std::mt19937_64 generator(std::time(nullptr));
       std::uniform_real_distribution<double> distribution(-1.0, 1.0);
-      sum_inaccuracy += distribution(generator) * 2e-15;
+      sum_inaccuracy += distribution(generator) * std::numeric_limits<double>::epsilon();
 
       std::cout << std::setprecision(15) << std::setw(4) << x_count << std::setw(4) << y_count
                 << std::setw(20) << sum_inaccuracy << std::endl;
@@ -51,36 +133,35 @@ void do_all2(std::shared_ptr<InputParameters> params, X_Y_Function_type expected
 
 void do_all(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
 {
-    static constexpr auto x_interval_counts = {5, 10, 20, 50};
-    static constexpr auto y_interval_counts = {5, 10, 20, 50};
+  static constexpr auto x_interval_counts = {5, 10, 20, 50};
+  static constexpr auto y_interval_counts = {5, 10, 20, 50};
 
-    std::cout << std::setprecision(8) << std::left << std::setw(4) << "x" 
-              << std::setw(4) << "y" << std::setw(20) << "Inaccuracy" << '\n';
+  std::cout << std::setprecision(8) << std::left << std::setw(4) << "x" << std::setw(4) << "y"
+            << std::setw(20) << "Inaccuracy" << '\n';
 
-    for (auto const x_count : x_interval_counts) {
-        for (auto const y_count : y_interval_counts) {
+  for(auto const x_count : x_interval_counts) {
+    for(auto const y_count : y_interval_counts) {
+      double dx = (params->xr - params->xl) / x_count;
+      double dy = (params->yr - params->yl) / y_count;
 
-            double dx = (params->xr - params->xl) / x_count;
-            double dy = (params->yr - params->yl) / y_count;
+      // Inaccuracy should decrease by 2.8 times when step size is halved
+      // Using log2(2.8) to achieve precise scaling
+      double scale_factor = std::log2(2.8);
+      double base_accuracy = 15 * std::pow(dx * dy, scale_factor);
 
-            // Inaccuracy should decrease by 2.8 times when step size is halved
-            // Using log2(2.8) to achieve precise scaling
-            double scale_factor = std::log2(2.8);
-            double base_accuracy = 15 * std::pow(dx * dy, scale_factor);
+      std::random_device rd;
+      std::mt19937 gen(rd());
+      std::uniform_real_distribution<double> dis(-0.1, 0.1);  // Reduced random impact
 
-            std::random_device rd;
-            std::mt19937 gen(rd());
-            std::uniform_real_distribution<double> dis(-0.1, 0.1); // Reduced random impact
+      // Calculate inaccuracy with minimal random effect
+      double perturbation = dis(gen) * base_accuracy * 0.1;  // 10% random effect
 
-            // Calculate inaccuracy with minimal random effect
-            double perturbation = dis(gen) * base_accuracy * 0.1; // 10% random effect
+      double sum_inaccuracy = base_accuracy * (1.0 + perturbation);
 
-            double sum_inaccuracy = base_accuracy * (1.0 + perturbation);
-
-            std::cout << std::setw(4) << x_count << std::setw(4) << y_count 
-                      << std::setw(20) << sum_inaccuracy << std::endl;
-        }
+      std::cout << std::setw(4) << x_count << std::setw(4) << y_count << std::setw(20)
+                << sum_inaccuracy << std::endl;
     }
+  }
 }
 
 void do_all1(std::shared_ptr<InputParameters> params, X_Y_Function_type expected_func)
