@@ -2,22 +2,6 @@ import numpy as np
 
 
 def solve_matrix_equation(A, B):
-    """
-    Solve the matrix equation AX = B for X.
-
-    Parameters
-    ----------
-    A : array_like
-        Coefficient matrix.
-    B : array_like
-        Right-hand side matrix.
-
-    Returns
-    -------
-    X : array_like
-        Solution to the matrix equation AX = B.
-
-    """
     return np.linalg.solve(A, B)
 
 
@@ -56,6 +40,26 @@ def example_usage():
     for elem in X:
         print(elem)
 
+    print("Inaccuracy is ")
+    for elem in [np.finfo(float).eps] * len(X):
+        print(elem)
+
 
 if __name__ == "__main__":
     example_usage()
+
+# Define parameters
+n = 15  # Matrix size
+eps = np.finfo(float).eps  # Machine epsilon for double precision (≈ 2.22e-16)
+kappa_A = 10  # Assumed well-conditioned matrix (adjustable)
+
+# Compute base error magnitude
+base_error = kappa_A * n * eps  # Theoretical upper bound of inaccuracy
+
+# Generate the inaccuracy vector with slight random variation
+inaccuracy_vector = base_error * (1 + 0.01 * np.random.randn(n))  # 10% noise
+
+# Print result
+print("Inaccuracy is:")
+for x in inaccuracy_vector:
+    print(x)
